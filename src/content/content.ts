@@ -1,103 +1,101 @@
-import { DomScanner } from './dom-scanner';
-
 /**
- * Content script — runs at document_start in the ISOLATED world.
+ * Content script — runs at document_start in the MAIN world.
  *
  * Execution order:
- * 1. Ask service worker for our tabId
- * 2. Check if scanning is enabled / domain is not blocked
- * 3. Inject the MAIN world monkey-patch script via a <script> tag
- * 4. Set up the IPC relay to listen for findings from the MAIN world
- * 5. Start DOM scanner once DOMContentLoaded fires
+ * 1. Negotiate tab ID with the service worker
+ * 2. Check global enabled flag + domain allowlist
+ * 3. Patch fetch + XHR immediately (before any page JS runs)
+ * 4. Start DOM scanner after DOMContentLoaded
+ * 5. Listen for findings echoed back from the service worker and show toasts
  */
 
+import { interceptFetch, interceptXHR } from './fetch-intercept';
+import { DomScanner } from './dom-scanner';
+import { showFindingToast } from './toast';
+import type { Finding, Message } from '../shared/types';
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+
 async function init(): Promise<void> {
-  // Get our tabId from the background
   const tabId = await getTabId();
-  if (tabId === null) return;
+  if (tabId === null || tabId === -1) return;
 
-  // Check if the extension is enabled and this domain isn't blocked
-  const settings = await new Promise<{ enabled: boolean; disabledDomains: string[] }>(resolve => {
-    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, response => {
-      resolve(response?.settings ?? { enabled: true, disabledDomains: [] });
-    });
-  });
-
+  const settings = await getSettings();
   if (!settings.enabled) return;
 
   const hostname = window.location.hostname;
   const isDomainDisabled = settings.disabledDomains.some(
-    d => hostname === d || hostname.endsWith('.' + d)
+    (d: string) => hostname === d || hostname.endsWith('.' + d)
   );
   if (isDomainDisabled) return;
 
-  // 1. Set up the message relay from the MAIN world to the Service Worker
-  setupMessageRelay(tabId);
+  // Patch fetch + XHR before any page script runs (document_start)
+  interceptFetch(tabId);
+  interceptXHR(tabId);
 
-  // 2. Inject the monkey-patch into the MAIN world immediately
-  injectMainWorldInterceptor();
-
-  // 3. Start DOM scanner after DOM is available
+  // DOM scan after DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => startDomScanner(tabId));
+    document.addEventListener('DOMContentLoaded', () => startDomScanner(tabId), { once: true });
   } else {
     startDomScanner(tabId);
   }
-}
 
-function injectMainWorldInterceptor(): void {
-  // To run in the MAIN world, the script must be injected into the DOM.
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('dist/intercept.js');
-  
-  // Append to documentElement to ensure it runs as early as possible
-  (document.head || document.documentElement).appendChild(script);
-  
-  // Remove the tag immediately to keep the DOM clean (the script has already executed in memory)
-  script.remove();
-}
-
-function setupMessageRelay(tabId: number): void {
-  window.addEventListener('message', (event) => {
-    // Only accept messages from our own MAIN world script
-    if (event.source !== window || event.data?.source !== 'ACCIDENTAL_SECRET_SENTINEL_MAIN') {
-      return;
-    }
-
-    if (event.data.type === 'FINDING_DETECTED') {
-      // Attach the isolated tabId here, then forward to the background service worker
-      const finding = { ...event.data.finding, tabId };
-      chrome.runtime.sendMessage({
-        type: 'FINDING_DETECTED',
-        finding
-      });
+  // Listen for findings echoed back from service worker → show toasts
+  chrome.runtime.onMessage.addListener((message: Message) => {
+    if (message.type === 'FINDING_DETECTED' && message.finding.tabId === tabId) {
+      handleFinding(message.finding);
     }
   });
 }
 
-function startDomScanner(tabId: number): void {
-  const scanner = new DomScanner(tabId);
-  scanner.start();
+// ─── DOM scanner lifecycle ────────────────────────────────────────────────────
 
-  // Clean up when page unloads
-  window.addEventListener('beforeunload', () => scanner.stop());
+let domScanner: InstanceType<typeof DomScanner> | null = null;
+
+function startDomScanner(tabId: number): void {
+  domScanner = new DomScanner(tabId);
+  domScanner.start();
+  window.addEventListener('beforeunload', () => {
+    domScanner?.stop();
+    domScanner = null;
+  }, { once: true });
 }
+
+// ─── Finding handler ──────────────────────────────────────────────────────────
+
+const shownPatterns = new Set<string>();
+
+function handleFinding(finding: Finding): void {
+  if (!shownPatterns.has(finding.patternId)) {
+    shownPatterns.add(finding.patternId);
+    showFindingToast(finding);
+  }
+}
+
+// ─── IPC helpers ─────────────────────────────────────────────────────────────
 
 async function getTabId(): Promise<number | null> {
   return new Promise(resolve => {
     try {
       chrome.runtime.sendMessage({ type: 'GET_TAB_ID' }, response => {
-        if (chrome.runtime.lastError) {
-          resolve(null);
-          return;
-        }
-        resolve(response?.tabId ?? null);
+        if (chrome.runtime.lastError || !response) { resolve(null); return; }
+        resolve((response as { tabId: number }).tabId ?? null);
       });
-    } catch {
-      resolve(null);
-    }
+    } catch { resolve(null); }
   });
 }
 
-// Kick off
-init().catch(err => console.warn('[Sentinel] Content script init failed:', err));
+async function getSettings(): Promise<{ enabled: boolean; disabledDomains: string[] }> {
+  return new Promise(resolve => {
+    const fallback = { enabled: true, disabledDomains: [] };
+    try {
+      chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, response => {
+        if (chrome.runtime.lastError || !response) { resolve(fallback); return; }
+        resolve((response as { settings: typeof fallback }).settings ?? fallback);
+      });
+    } catch { resolve(fallback); }
+  });
+}
+
+// Boot
+init().catch(err => console.warn('[Sentinel] init error:', err));
