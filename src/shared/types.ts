@@ -11,12 +11,6 @@ export type SourceType =
   | 'html-source'
   | 'url-param';
 
-  export interface ScanContext {
-  url: string;
-  tabId: number;
-  sourceType: SourceType;
-}
-
 export interface Pattern {
   id: string;
   name: string;
@@ -89,7 +83,9 @@ export type MessageType =
   | 'CLEAR_FINDINGS'
   | 'GET_SETTINGS'
   | 'GET_SETTINGS_RESPONSE'
-  | 'UPDATE_SETTINGS';
+  | 'UPDATE_SETTINGS'
+  | 'GET_TAB_ID'
+  | 'GET_TAB_ID_RESPONSE';
 
 export interface BaseMessage {
   type: MessageType;
@@ -134,6 +130,15 @@ export interface UpdateSettingsMessage extends BaseMessage {
   settings: Partial<StorageSync>;
 }
 
+export interface GetTabIdMessage extends BaseMessage {
+  type: 'GET_TAB_ID';
+}
+
+export interface GetTabIdResponseMessage extends BaseMessage {
+  type: 'GET_TAB_ID_RESPONSE';
+  tabId: number;
+}
+
 export type Message =
   | FindingDetectedMessage
   | GetFindingsMessage
@@ -142,4 +147,6 @@ export type Message =
   | ClearFindingsMessage
   | GetSettingsMessage
   | GetSettingsResponseMessage
-  | UpdateSettingsMessage;
+  | UpdateSettingsMessage
+  | GetTabIdMessage
+  | GetTabIdResponseMessage;

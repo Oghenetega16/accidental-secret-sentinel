@@ -57,7 +57,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 chrome.runtime.onMessage.addListener(
   (message, sender, sendResponse) => {
-    handleMessage(message).then(sendResponse).catch((err) => {
+    handleMessage(message, sender).then(sendResponse).catch((err) => {
       console.error("[Sentinel] Message handler error:", err);
       sendResponse(null);
     });
@@ -65,7 +65,11 @@ chrome.runtime.onMessage.addListener(
   }
 );
 async function handleMessage(message, sender) {
+  var _a;
   switch (message.type) {
+    case "GET_TAB_ID": {
+      return { type: "GET_TAB_ID_RESPONSE", tabId: ((_a = sender.tab) == null ? void 0 : _a.id) ?? -1 };
+    }
     case "FINDING_DETECTED": {
       const finding = message.finding;
       const settings = await getSettings();

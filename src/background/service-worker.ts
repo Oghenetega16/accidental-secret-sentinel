@@ -39,6 +39,10 @@ async function handleMessage(
 ): Promise<unknown> {
   switch (message.type) {
 
+    case 'GET_TAB_ID': {
+      return { type: 'GET_TAB_ID_RESPONSE', tabId: sender.tab?.id ?? -1 };
+    }
+
     case 'FINDING_DETECTED': {
       const finding: Finding = message.finding;
       const settings = await getSettings();

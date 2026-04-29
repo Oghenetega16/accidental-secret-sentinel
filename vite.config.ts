@@ -1,5 +1,9 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+// __dirname is not available in ESM — derive it from import.meta.url
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   build: {
@@ -8,19 +12,16 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       input: {
+        // TS entries only — HTML files stay at project root and reference
+        // the built JS files in dist/ directly via <script src="dist/...">
         background: resolve(__dirname, 'src/background/service-worker.ts'),
-        content: resolve(__dirname, 'src/content/content.ts'),
-        intercept: resolve(__dirname, 'src/content/fetch-intercept.ts'), // <-- Add this
-        popup: resolve(__dirname, 'popup.html'),
-        // options: resolve(__dirname, 'options.html'),
-        devtools: resolve(__dirname, 'devtools.html'),
+        content:    resolve(__dirname, 'src/content/content.ts'),
+        popup:      resolve(__dirname, 'src/popup/popup.ts'),
+        panel:      resolve(__dirname, 'src/devtools/panel.ts'),
       },
       output: {
-        manualChunks: undefined,
-        inlineDynamicImports: true,
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },
     // Keep output readable during development
