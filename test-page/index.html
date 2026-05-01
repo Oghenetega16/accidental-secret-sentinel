@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sentinel Test Page — Intentional Leaks</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f8f8f7;
+            color: #1a1a18;
+            padding: 32px;
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 28px;
+        }
+
+        .section {
+            background: #fff;
+            border: 1px solid #e8e6e0;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+        }
+
+        .section h2 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #185FA5;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+        }
+
+        .test-btn {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 14px;
+            background: #185FA5;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-bottom: 6px;
+        }
+
+        .test-btn:hover {
+            opacity: .85;
+        }
+
+        .test-btn.danger {
+            background: #E24B4A;
+        }
+
+        .log {
+            font-family: monospace;
+            font-size: 11px;
+            color: #555;
+            background: #f1efe8;
+            border-radius: 4px;
+            padding: 8px 10px;
+            margin-top: 10px;
+            min-height: 30px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 7px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+
+        .badge-html {
+            background: #E6F1FB;
+            color: #0C447C;
+        }
+
+        .badge-js {
+            background: #EAF3DE;
+            color: #27500A;
+        }
+
+        .badge-net {
+            background: #FAEEDA;
+            color: #633806;
+        }
+
+        .tip {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🔑 Sentinel Test Page</h1>
+    <p class="subtitle">Load this file in Chrome with Sentinel installed. Each section triggers a different detection
+        surface.<br>
+        You should see toast notifications and badge counts appear as each test fires.</p>
+
+    <!-- ── Surface 1: HTML source ──────────────────────────────────────────── -->
+    <div class="section">
+        <h2>Surface 1 — HTML source <span class="badge badge-html">html-source</span></h2>
+        <p class="tip">These are embedded directly in the page HTML. Sentinel scans document.documentElement.outerHTML
+            on DOMContentLoaded.</p>
+
+        <!-- Intentional leaks in HTML comments and meta tags -->
+        <!-- AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE -->
+        <!-- STRIPE_KEY: sk_live_4eC39HqLyjWDarjtT1zdp7dc -->
+        <meta name="x-debug-token" content="ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345abcd" />
+    </div>
+
+    <!-- ── Surface 2: Inline JS ────────────────────────────────────────────── -->
+    <div class="section">
+        <h2>Surface 2 — Inline script <span class="badge badge-js">js-bundle</span></h2>
+        <p class="tip">Sentinel scans all inline &lt;script&gt; tags via MutationObserver.</p>
+
+        <script id="config-script">
+            // Intentional leak — simulating a misconfigured config object
+            window.__APP_CONFIG__ = {
+                openaiKey: "sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV",
+                sendgridKey: "SG.aBcDeFgHiJkLmNoPqRsTuV.WxYzAbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKlM",
+                env: "production"
+            };
+        </script>
+    </div>
+
+    <!-- ── Surface 3: Network requests ─────────────────────────────────────── -->
+    <div class="section">
+        <h2>Surface 3 — Network requests <span class="badge badge-net">request-header / response-body</span></h2>
+        <p class="tip">Click the buttons below to fire test requests. Sentinel intercepts them via the fetch/XHR
+            monkey-patch.</p>
+
+        <button class="test-btn" id="btn-fetch-header">
+            Leak in request header
+        </button>
+        <button class="test-btn" id="btn-fetch-body">
+            Leak in request body
+        </button>
+        <button class="test-btn" id="btn-xhr-body">
+            Leak in XHR body
+        </button>
+        <button class="test-btn" id="btn-response-body">
+            Leak in response body
+        </button>
+        <button class="test-btn" id="btn-jwt">
+            JWT in Authorization header
+        </button>
+        <div class="log" id="net-log">Waiting for button clicks…</div>
+    </div>
+
+    <!-- ── Surface 4: Dynamically injected script ───────────────────────────── -->
+    <div class="section">
+        <h2>Surface 4 — Dynamic script injection <span class="badge badge-js">js-bundle</span></h2>
+        <p class="tip">Simulates a third-party script being injected after page load (e.g. tag managers, analytics
+            SDKs).</p>
+
+        <button class="test-btn danger" id="btn-inject-script">Inject script with leaked key</button>
+        <div class="log" id="inject-log">Waiting…</div>
+    </div>
+
+    <!-- ── Surface 5: Clean requests (false positive check) ─────────────────── -->
+    <div class="section">
+        <h2>Surface 5 — Clean requests (should NOT trigger) <span class="badge badge-net">false positive check</span>
+        </h2>
+        <p class="tip">These requests contain UUID-like strings and short tokens. Sentinel should stay silent.</p>
+
+        <button class="test-btn" id="btn-clean-uuid">UUID in response</button>
+        <button class="test-btn" id="btn-clean-short">Short token (too short to match)</button>
+        <button class="test-btn" id="btn-clean-bearer">Low-entropy bearer token</button>
+        <div class="log" id="clean-log">Waiting…</div>
+    </div>
+
+    <script>
+        // ── Helpers ──────────────────────────────────────────────────────────────
+        function log(id, msg) {
+            document.getElementById(id).textContent = msg;
+        }
+
+        // Mock API endpoint — use httpbin or a data URL fallback
+        const MOCK_URL = 'https://httpbin.org/post';
+        const MOCK_GET = 'https://httpbin.org/get';
+
+        // ── Surface 3: Network tests ─────────────────────────────────────────────
+
+        document.getElementById('btn-fetch-header').addEventListener('click', async () => {
+            log('net-log', 'Sending request with AWS key in Authorization header…');
+            try {
+                await fetch(MOCK_GET, {
+                    headers: {
+                        'Authorization': 'Bearer AKIAIOSFODNN7EXAMPLE',
+                        'X-App-Version': '1.0.0'
+                    }
+                });
+                log('net-log', 'Done — check Sentinel popup for request-header finding.');
+            } catch { log('net-log', 'Network error (offline?) — fetch intercepted regardless.'); }
+        });
+
+        document.getElementById('btn-fetch-body').addEventListener('click', async () => {
+            log('net-log', 'POSTing body with Stripe key…');
+            try {
+                await fetch(MOCK_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        config: { stripe_secret: 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' }
+                    })
+                });
+                log('net-log', 'Done — check Sentinel popup for request-body finding.');
+            } catch { log('net-log', 'Network error — request body was still scanned.'); }
+        });
+
+        document.getElementById('btn-xhr-body').addEventListener('click', () => {
+            log('net-log', 'XHR POST with Slack token in body…');
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', MOCK_URL);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.onload = () => log('net-log', 'XHR done — check Sentinel popup for request-body finding.');
+            xhr.onerror = () => log('net-log', 'XHR error (offline?) — body was still scanned.');
+            xhr.send(JSON.stringify({
+                token: 'xoxb-123456789012-123456789012-abcdefghijklmnopqrstuvwx'
+            }));
+        });
+
+        document.getElementById('btn-response-body').addEventListener('click', async () => {
+            log('net-log', 'Fetching a response that contains a GitHub PAT…');
+            // Use a data: URI to simulate a response body with a secret —
+            // works offline and avoids CORS issues
+            try {
+                const encoded = btoa(JSON.stringify({
+                    debug: { github_token: 'ghp_' + 'a'.repeat(36) }
+                }));
+                // Fetch a data URL — the response body will be scanned
+                const res = await fetch('data:application/json;base64,' + encoded);
+                await res.text(); // trigger clone + scan in interceptor
+                log('net-log', 'Done — check popup for response-body finding.');
+            } catch (e) { log('net-log', 'Error: ' + e.message); }
+        });
+
+        document.getElementById('btn-jwt').addEventListener('click', async () => {
+            log('net-log', 'Sending real JWT in Authorization header…');
+            try {
+                await fetch(MOCK_GET, {
+                    headers: {
+                        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'
+                    }
+                });
+                log('net-log', 'Done — JWT should appear as request-header finding.');
+            } catch { log('net-log', 'Network error — header was still scanned.'); }
+        });
+
+        // ── Surface 4: Dynamic script injection ──────────────────────────────────
+
+        document.getElementById('btn-inject-script').addEventListener('click', () => {
+            const script = document.createElement('script');
+            script.id = 'injected-third-party';
+            script.textContent = `
+        // Simulated third-party analytics SDK with leaked credentials
+        var _analytics = {
+          apiKey: "SG.aBcDeFgHiJkLmNoPqRsTuV.WxYzAbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKlM",
+          region: "us-east-1"
+        };
+      `;
+            document.head.appendChild(script);
+            document.getElementById('inject-log').textContent =
+                'Script injected — MutationObserver should have caught it.';
+        });
+
+        // ── Surface 5: Clean requests ─────────────────────────────────────────────
+
+        document.getElementById('btn-clean-uuid').addEventListener('click', async () => {
+            log('clean-log', 'Fetching response with UUIDs — should be silent…');
+            try {
+                await fetch(MOCK_GET + '?session=550e8400-e29b-41d4-a716-446655440000');
+                log('clean-log', 'Done — no findings expected for UUID-only content.');
+            } catch { log('clean-log', 'Network error.'); }
+        });
+
+        document.getElementById('btn-clean-short').addEventListener('click', async () => {
+            log('clean-log', 'Sending short token (12 chars) — too short for any pattern…');
+            await fetch(MOCK_GET, {
+                headers: { 'X-Token': 'abc123def456' }
+            }).catch(() => { });
+            log('clean-log', 'Done — no findings expected.');
+        });
+
+        document.getElementById('btn-clean-bearer').addEventListener('click', async () => {
+            log('clean-log', 'Sending low-entropy bearer (all same chars) — entropy filter should block…');
+            await fetch(MOCK_GET, {
+                headers: { 'Authorization': 'Bearer aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+            }).catch(() => { });
+            log('clean-log', 'Done — no findings expected (entropy too low).');
+        });
+    </script>
+
+</body>
+
+</html>
