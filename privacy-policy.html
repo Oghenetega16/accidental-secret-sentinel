@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy — Accidental Secret Sentinel</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-size: 15px;
+            line-height: 1.7;
+            color: #1a1a18;
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 48px 24px 80px;
+        }
+
+        h1 {
+            font-size: 26px;
+            font-weight: 700;
+            color: #0C447C;
+            margin-bottom: 6px;
+        }
+
+        .meta {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 36px;
+        }
+
+        h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #185FA5;
+            margin: 28px 0 8px;
+        }
+
+        p {
+            margin-bottom: 12px;
+            color: #333;
+        }
+
+        ul {
+            padding-left: 20px;
+            margin-bottom: 12px;
+        }
+
+        li {
+            margin-bottom: 4px;
+            color: #333;
+        }
+
+        .highlight {
+            background: #EAF3DE;
+            border-left: 3px solid #27500A;
+            padding: 12px 16px;
+            border-radius: 0 6px 6px 0;
+            margin: 16px 0;
+            font-weight: 500;
+            color: #27500A;
+        }
+
+        a {
+            color: #185FA5;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #e8e6e0;
+            margin: 32px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Privacy Policy</h1>
+    <p class="meta">Accidental Secret Sentinel Chrome Extension &nbsp;·&nbsp; Last updated: May 2026</p>
+
+    <div class="highlight">
+        TL;DR — This extension processes everything locally in your browser.
+        No data is ever sent to any server. No analytics. No telemetry.
+    </div>
+
+    <h2>What we collect</h2>
+    <p>Accidental Secret Sentinel collects nothing. The extension:</p>
+    <ul>
+        <li>Does <strong>not</strong> transmit any scanned data outside your browser</li>
+        <li>Does <strong>not</strong> log, store, or upload findings to any server</li>
+        <li>Does <strong>not</strong> collect analytics, crash reports, or usage telemetry</li>
+        <li>Does <strong>not</strong> use cookies or third-party tracking</li>
+        <li>Does <strong>not</strong> communicate with any external service or API</li>
+    </ul>
+
+    <h2>How scanning works</h2>
+    <p>All secret detection runs entirely within your browser using Chrome extension APIs. The extension:</p>
+    <ul>
+        <li>Intercepts network requests and responses locally, before they leave or enter your browser</li>
+        <li>Scans JavaScript bundles and HTML source as they are loaded into your tab</li>
+        <li>Stores findings temporarily in <code>chrome.storage.local</code> — a sandboxed, browser-local store that no
+            external party can access</li>
+        <li>Stores your suppression list and settings in <code>chrome.storage.sync</code>, which Chrome may sync across
+            your own signed-in devices via Google's infrastructure</li>
+    </ul>
+
+    <h2>Permissions used and why</h2>
+    <ul>
+        <li><strong>storage</strong> — to save findings and your suppression list locally</li>
+        <li><strong>scripting</strong> — to inject the content script that intercepts page-level requests</li>
+        <li><strong>activeTab</strong> — to read the current tab's URL for domain suppression checks</li>
+        <li><strong>webRequest</strong> — to observe network request metadata (headers only, not bodies; bodies are read
+            via the page-context content script)</li>
+        <li><strong>&lt;all_urls&gt;</strong> — required to scan requests and page content across all sites you visit
+        </li>
+    </ul>
+
+    <h2>Data retention</h2>
+    <p>Findings are stored only for the duration of your browser session on a given tab. They are automatically cleared
+        when you navigate away from a page or close the tab. Your suppression list persists until you manually remove
+        entries via the Settings page.</p>
+
+    <h2>Third parties</h2>
+    <p>This extension has no third-party dependencies that make network requests. All pattern matching logic is bundled
+        locally.</p>
+
+    <hr />
+
+    <h2>Contact</h2>
+    <p>If you have questions about this privacy policy, please open an issue on the project's GitHub repository or
+        contact the developer directly via the Chrome Web Store listing page.</p>
+</body>
+
+</html>
