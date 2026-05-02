@@ -6,7 +6,12 @@ const DEFAULT_SYNC = {
 };
 async function getSettings() {
   const result = await chrome.storage.sync.get(DEFAULT_SYNC);
-  return result;
+  return {
+    suppressions: Array.isArray(result["suppressions"]) ? result["suppressions"] : [],
+    customPatterns: Array.isArray(result["customPatterns"]) ? result["customPatterns"] : [],
+    disabledDomains: Array.isArray(result["disabledDomains"]) ? result["disabledDomains"] : [],
+    enabled: typeof result["enabled"] === "boolean" ? result["enabled"] : true
+  };
 }
 async function updateSettings(partial) {
   await chrome.storage.sync.set(partial);
@@ -32,8 +37,7 @@ async function clearFindings(tabId) {
   await chrome.storage.local.set({ findings: all });
 }
 async function getFindingCount(tabId) {
-  const findings = await getFindings(tabId);
-  return findings.length;
+  return (await getFindings(tabId)).length;
 }
 function isSuppressed(finding, settings) {
   const { suppressions, disabledDomains } = settings;

@@ -22,7 +22,7 @@ export class DomScanner {
     // Watch for dynamically added script tags
     this.observer = new MutationObserver(mutations => {
       for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
+        for (const node of Array.from(mutation.addedNodes)) {
           if (node instanceof HTMLScriptElement) {
             this.handleScriptTag(node);
           }

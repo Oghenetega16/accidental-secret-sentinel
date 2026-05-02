@@ -1,355 +1,279 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Accidental Secret Sentinel</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Accidental Secret Sentinel</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            font-size: 13px;
-            width: 380px;
-            min-height: 200px;
-            max-height: 600px;
-            overflow-y: auto;
-            background: #fff;
-            color: #1a1a1a;
-        }
+    :root {
+      --c-bg:           #ffffff;
+      --c-bg-subtle:    #f8f8f7;
+      --c-bg-hover:     #f3f2ef;
+      --c-border:       #e8e6e0;
+      --c-border-light: #f0ede8;
+      --c-text:         #1a1a18;
+      --c-text-dim:     #555550;
+      --c-text-muted:   #888880;
+      --c-brand:        #185FA5;
+      --c-brand-light:  #E6F1FB;
+      --c-critical-bg:  #FCEBEB;
+      --c-critical-fg:  #791F1F;
+      --c-critical-dot: #E24B4A;
+      --c-warning-bg:   #FAEEDA;
+      --c-warning-fg:   #633806;
+      --c-info-bg:      #E6F1FB;
+      --c-info-fg:      #0C447C;
+      --c-success-bg:   #EAF3DE;
+      --c-success-fg:   #27500A;
+      --font-mono: 'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+    }
 
-        /* ── Header ─────────────────────────────────────── */
-        .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            border-bottom: 1px solid #eee;
-            position: sticky;
-            top: 0;
-            background: #fff;
-            z-index: 10;
-        }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      width: 380px;
+      min-height: 180px;
+      max-height: 600px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: var(--c-bg);
+      color: var(--c-text);
+      -webkit-font-smoothing: antialiased;
+    }
 
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+    /* ── Focus ring ── visible for keyboard users, hidden for mouse ── */
+    :focus { outline: none; }
+    :focus-visible {
+      outline: 2px solid var(--c-brand);
+      outline-offset: 2px;
+    }
 
-        .logo {
-            width: 20px;
-            height: 20px;
-            background: #E24B4A;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 12px;
-            font-weight: 700;
-        }
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 2px; }
 
-        .title {
-            font-weight: 600;
-            font-size: 13px;
-        }
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--c-border);
+      position: sticky;
+      top: 0;
+      background: var(--c-bg);
+      z-index: 20;
+    }
+    .header-left { display: flex; align-items: center; gap: 8px; }
+    .logo {
+      width: 22px; height: 22px;
+      background: var(--c-critical-dot);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 12px; font-weight: 700;
+      flex-shrink: 0;
+    }
+    .title { font-weight: 600; font-size: 13px; letter-spacing: -.01em; }
 
-        .toggle-wrap {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+    /* ── Toggle ── */
+    .toggle-wrap { display: flex; align-items: center; gap: 6px; }
+    .toggle-label { font-size: 11px; font-weight: 500; color: var(--c-text-muted); min-width: 18px; text-align: right; }
+    .toggle { position: relative; width: 30px; height: 17px; flex-shrink: 0; }
+    .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0;
+      background: var(--c-border); border-radius: 9px;
+      cursor: pointer; transition: background .18s;
+    }
+    .slider::before {
+      content: ''; position: absolute;
+      width: 13px; height: 13px; left: 2px; top: 2px;
+      background: #fff; border-radius: 50%;
+      transition: transform .18s;
+      box-shadow: 0 1px 2px rgba(0,0,0,.2);
+    }
+    input:checked + .slider { background: var(--c-brand); }
+    input:checked + .slider::before { transform: translateX(13px); }
+    input:focus-visible + .slider { outline: 2px solid var(--c-brand); outline-offset: 2px; border-radius: 9px; }
 
-        .toggle-label {
-            font-size: 11px;
-            color: #666;
-        }
+    /* ── Count bar ── */
+    .count-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 14px;
+      background: var(--c-bg-subtle);
+      border-bottom: 1px solid var(--c-border-light);
+      min-height: 32px;
+    }
+    .count-text { font-size: 11px; font-weight: 500; color: var(--c-text-dim); }
+    .btn-clear {
+      font-size: 11px; font-weight: 500;
+      color: var(--c-brand); background: none; border: none;
+      cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm);
+      transition: background .12s;
+    }
+    .btn-clear:hover { background: var(--c-brand-light); }
 
-        /* Toggle switch */
-        .toggle {
-            position: relative;
-            width: 28px;
-            height: 16px;
-        }
+    /* ── Empty state ── */
+    .empty { padding: 32px 16px; text-align: center; }
+    .empty-icon { font-size: 28px; margin-bottom: 8px; display: block; }
+    .empty-title { font-weight: 600; font-size: 13px; color: var(--c-text); margin-bottom: 4px; }
+    .empty-sub { font-size: 12px; color: var(--c-text-muted); line-height: 1.6; }
 
-        .toggle input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
+    /* ── Finding card ── */
+    .finding {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--c-border-light);
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .finding:hover, .finding:focus-visible { background: var(--c-bg-hover); }
+    .finding.expanded { background: var(--c-bg-subtle); }
 
-        .slider {
-            position: absolute;
-            inset: 0;
-            background: #ccc;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background .2s;
-        }
+    .finding-header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 8px;
+    }
+    .finding-left { flex: 1; min-width: 0; }
+    .finding-name { font-weight: 600; font-size: 12px; color: var(--c-text); line-height: 1.3; }
+    .finding-value {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--c-text-dim); margin-top: 3px;
+    }
+    .finding-meta {
+      font-size: 11px; color: var(--c-text-muted);
+      margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
 
-        .slider::before {
-            content: '';
-            position: absolute;
-            width: 12px;
-            height: 12px;
-            left: 2px;
-            top: 2px;
-            background: #fff;
-            border-radius: 50%;
-            transition: transform .2s;
-        }
+    .finding-right { display: flex; align-items: flex-start; gap: 6px; flex-shrink: 0; }
 
-        input:checked+.slider {
-            background: #185FA5;
-        }
+    .severity {
+      font-size: 9px; font-weight: 700; letter-spacing: .05em;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 3px;
+      flex-shrink: 0; margin-top: 1px;
+    }
+    .severity-critical { background: var(--c-critical-bg); color: var(--c-critical-fg); }
+    .severity-warning  { background: var(--c-warning-bg);  color: var(--c-warning-fg); }
+    .severity-info     { background: var(--c-info-bg);     color: var(--c-info-fg); }
 
-        input:checked+.slider::before {
-            transform: translateX(12px);
-        }
+    /* chevron */
+    .chevron {
+      width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;
+      color: var(--c-text-muted); transition: transform .15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .finding.expanded .chevron { transform: rotate(180deg); }
+    .chevron svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; }
 
-        /* ── Findings count bar ──────────────────────────── */
-        .count-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 16px;
-            background: #f8f8f8;
-            border-bottom: 1px solid #eee;
-        }
+    /* ── Expanded detail ── */
+    .finding-detail {
+      margin-top: 8px; padding-top: 8px;
+      border-top: 1px solid var(--c-border-light);
+      display: none;
+    }
+    .finding.expanded .finding-detail { display: block; }
 
-        .count-text {
-            font-size: 12px;
-            color: #555;
-        }
+    .detail-grid {
+      display: grid; grid-template-columns: 68px 1fr;
+      gap: 3px 8px; margin-bottom: 8px;
+    }
+    .detail-label { font-size: 11px; color: var(--c-text-muted); font-weight: 500; padding-top: 1px; }
+    .detail-value { font-size: 11px; color: var(--c-text-dim); word-break: break-all; line-height: 1.5; }
+    .detail-value.mono { font-family: var(--font-mono); font-size: 10.5px; }
 
-        .count-badge {
-            font-size: 11px;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 10px;
-        }
+    /* ── Suppress row ── */
+    .suppress-row {
+      display: flex; gap: 5px; flex-wrap: wrap;
+      margin-top: 6px; padding-top: 6px;
+      border-top: 1px solid var(--c-border-light);
+    }
+    .suppress-label {
+      font-size: 10px; font-weight: 500; color: var(--c-text-muted);
+      width: 100%; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px;
+    }
+    .btn-suppress {
+      font-size: 11px; font-weight: 500;
+      padding: 3px 9px;
+      border: 1px solid var(--c-border); border-radius: var(--radius-sm);
+      background: var(--c-bg); color: var(--c-text-dim);
+      cursor: pointer; transition: background .12s, border-color .12s;
+      line-height: 1.4;
+    }
+    .btn-suppress:hover { background: var(--c-bg-hover); border-color: var(--c-text-muted); }
 
-        .badge-red {
-            background: #FCEBEB;
-            color: #791F1F;
-        }
+    /* ── Footer ── */
+    .footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 14px;
+      border-top: 1px solid var(--c-border);
+      position: sticky; bottom: 0; background: var(--c-bg); z-index: 10;
+    }
+    .footer-btn {
+      font-size: 11px; font-weight: 500;
+      color: var(--c-brand); background: none; border: none;
+      cursor: pointer; padding: 3px 6px; border-radius: var(--radius-sm);
+      transition: background .12s;
+    }
+    .footer-btn:hover { background: var(--c-brand-light); }
+    .footer-btn.muted { color: var(--c-text-muted); }
+    .footer-btn.muted:hover { background: var(--c-bg-hover); color: var(--c-text-dim); }
 
-        .badge-gray {
-            background: #eee;
-            color: #666;
-        }
-
-        .btn-clear {
-            font-size: 11px;
-            color: #185FA5;
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 2px 4px;
-        }
-
-        .btn-clear:hover {
-            text-decoration: underline;
-        }
-
-        /* ── Empty state ─────────────────────────────────── */
-        .empty {
-            padding: 32px 16px;
-            text-align: center;
-            color: #888;
-        }
-
-        .empty-icon {
-            font-size: 28px;
-            margin-bottom: 8px;
-        }
-
-        .empty-title {
-            font-weight: 600;
-            font-size: 13px;
-            color: #333;
-            margin-bottom: 4px;
-        }
-
-        .empty-sub {
-            font-size: 12px;
-            line-height: 1.5;
-        }
-
-        /* ── Finding card ────────────────────────────────── */
-        .finding {
-            padding: 10px 16px;
-            border-bottom: 1px solid #f0f0f0;
-            cursor: pointer;
-        }
-
-        .finding:hover {
-            background: #fafafa;
-        }
-
-        .finding.expanded {
-            background: #fafafa;
-        }
-
-        .finding-header {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 8px;
-        }
-
-        .finding-name {
-            font-weight: 600;
-            font-size: 12px;
-            flex: 1;
-        }
-
-        .severity {
-            font-size: 10px;
-            font-weight: 600;
-            padding: 2px 6px;
-            border-radius: 4px;
-            flex-shrink: 0;
-        }
-
-        .severity-critical {
-            background: #FCEBEB;
-            color: #791F1F;
-        }
-
-        .severity-warning {
-            background: #FAEEDA;
-            color: #633806;
-        }
-
-        .severity-info {
-            background: #E6F1FB;
-            color: #0C447C;
-        }
-
-        .finding-value {
-            font-family: monospace;
-            font-size: 11px;
-            color: #555;
-            margin-top: 3px;
-        }
-
-        .finding-meta {
-            font-size: 11px;
-            color: #888;
-            margin-top: 3px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        /* Expanded detail */
-        .finding-detail {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #eee;
-            display: none;
-        }
-
-        .finding.expanded .finding-detail {
-            display: block;
-        }
-
-        .detail-row {
-            display: flex;
-            gap: 6px;
-            font-size: 11px;
-            color: #555;
-            margin-bottom: 4px;
-            align-items: baseline;
-        }
-
-        .detail-label {
-            color: #888;
-            flex-shrink: 0;
-            width: 70px;
-        }
-
-        .suppress-row {
-            display: flex;
-            gap: 6px;
-            margin-top: 8px;
-            flex-wrap: wrap;
-        }
-
-        .btn-suppress {
-            font-size: 11px;
-            padding: 3px 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: #fff;
-            cursor: pointer;
-            color: #333;
-        }
-
-        .btn-suppress:hover {
-            background: #f5f5f5;
-        }
-
-        /* ── Footer ─────────────────────────────────────── */
-        .footer {
-            padding: 10px 16px;
-            border-top: 1px solid #eee;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .footer-link {
-            font-size: 11px;
-            color: #185FA5;
-            background: none;
-            border: none;
-            cursor: pointer;
-            text-decoration: none;
-        }
-
-        .footer-link:hover {
-            text-decoration: underline;
-        }
-    </style>
+    /* ── Disabled banner ── */
+    .disabled-banner {
+      background: var(--c-warning-bg); color: var(--c-warning-fg);
+      font-size: 12px; font-weight: 500;
+      padding: 7px 14px;
+      border-bottom: 1px solid #f0dfc0;
+      display: none;
+    }
+    .disabled-banner.visible { display: block; }
+  </style>
 </head>
-
 <body>
 
-    <div class="header">
-        <div class="header-left">
-            <div class="logo">S</div>
-            <span class="title">Secret Sentinel</span>
-        </div>
-        <div class="toggle-wrap">
-            <span class="toggle-label" id="toggle-label">On</span>
-            <label class="toggle">
-                <input type="checkbox" id="enabled-toggle" title="Toggle scanning" aria-labelledby="toggle-label" checked />
-                <span class="slider"></span>
-            </label>
-        </div>
+  <div class="header" role="banner">
+    <div class="header-left">
+      <div class="logo" aria-hidden="true">S</div>
+      <span class="title">Secret Sentinel</span>
     </div>
-
-    <div class="count-bar">
-        <span class="count-text" id="count-text">Scanning...</span>
-        <button class="btn-clear" id="btn-clear" style="display:none">Clear all</button>
+    <div class="toggle-wrap">
+      <span class="toggle-label" id="toggle-label" aria-hidden="true">On</span>
+      <label class="toggle" aria-label="Enable or disable scanning">
+        <input type="checkbox" id="enabled-toggle" checked
+               role="switch" aria-checked="true" aria-label="Scanning enabled" />
+        <span class="slider"></span>
+      </label>
     </div>
+  </div>
 
-    <div id="findings-list"></div>
+  <div class="disabled-banner" id="disabled-banner" role="status">
+    ⚠️ Scanning is paused — toggle on to resume.
+  </div>
 
-    <div class="footer">
-        <button class="footer-link" id="btn-settings">Settings & suppressions</button>
-        <button class="footer-link" id="btn-export">Export JSON</button>
-    </div>
-    
-    <script type="module" src="/src/popup/popup.ts"></script>
+  <div class="count-bar" role="status" aria-live="polite" aria-atomic="true">
+    <span class="count-text" id="count-text">Scanning…</span>
+    <button class="btn-clear" id="btn-clear" style="display:none"
+            aria-label="Clear all findings for this tab">Clear all</button>
+  </div>
+
+  <main id="findings-list" aria-label="Detected secrets" aria-live="polite"></main>
+
+  <div class="footer" role="contentinfo">
+    <button class="footer-btn muted" id="btn-settings"
+            aria-label="Open settings and suppression management">
+      Settings &amp; suppressions
+    </button>
+    <button class="footer-btn" id="btn-export"
+            aria-label="Export findings as JSON file">
+      Export JSON
+    </button>
+  </div>
+
+  <script src="dist/popup.js"></script>
 </body>
-
 </html>

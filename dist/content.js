@@ -366,6 +366,68 @@ function scan(input, opts) {
   }
   return results;
 }
+function interceptFetch(tabId) {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function(input, init2) {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (init2 == null ? void 0 : init2.headers) {
+      const headerStr = JSON.stringify(init2.headers);
+      emitFindings(headerStr, url, tabId, "request-header");
+    }
+    if ((init2 == null ? void 0 : init2.body) && typeof init2.body === "string") {
+      emitFindings(init2.body, url, tabId, "request-body");
+    }
+    const response = await originalFetch(input, init2);
+    const clone = response.clone();
+    clone.text().then((body) => {
+      emitFindings(body, url, tabId, "response-body");
+      const headerStr = JSON.stringify(Object.fromEntries(response.headers));
+      emitFindings(headerStr, url, tabId, "response-header");
+    }).catch(() => {
+    });
+    return response;
+  };
+}
+function interceptXHR(tabId) {
+  const OriginalXHR = window.XMLHttpRequest;
+  window.XMLHttpRequest = class extends OriginalXHR {
+    constructor() {
+      super(...arguments);
+      __publicField(this, "_url", "");
+    }
+    open(method, url, async, user, password) {
+      this._url = url.toString();
+      super.open(method, url.toString(), async ?? true, user, password);
+    }
+    send(body) {
+      if (body && typeof body === "string") {
+        emitFindings(body, this._url, tabId, "request-body");
+      }
+      this.addEventListener("load", () => {
+        if (typeof this.responseText === "string") {
+          emitFindings(this.responseText, this._url, tabId, "response-body");
+        }
+        const headers = this.getAllResponseHeaders();
+        if (headers) {
+          emitFindings(headers, this._url, tabId, "response-header");
+        }
+      });
+      super.send(body);
+    }
+  };
+}
+function emitFindings(input, url, tabId, sourceType) {
+  if (!input || input.length < 8) return;
+  const MAX_INLINE_SCAN = 5e4;
+  const chunk = input.length > MAX_INLINE_SCAN ? input.slice(0, MAX_INLINE_SCAN) : input;
+  const rawFindings = scan(chunk, { url, tabId, sourceType });
+  if (rawFindings.length === 0) return;
+  Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
+    for (const finding of findings) {
+      chrome.runtime.sendMessage({ type: "FINDING_DETECTED", finding });
+    }
+  }).catch((err) => console.warn("[Sentinel] Finding emit error:", err));
+}
 class DomScanner {
   constructor(tabId) {
     __publicField(this, "tabId");
@@ -378,7 +440,7 @@ class DomScanner {
     this.scanText(document.documentElement.outerHTML, "html-source", window.location.href);
     this.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
+        for (const node of Array.from(mutation.addedNodes)) {
           if (node instanceof HTMLScriptElement) {
             this.handleScriptTag(node);
           }
@@ -446,68 +508,200 @@ class DomScanner {
     }).catch((err) => console.warn("[Sentinel] DOM scan error:", err));
   }
 }
+const TOAST_ID_PREFIX = "sentinel-toast-";
+const STYLE_ID = "sentinel-toast-styles";
+const MAX_TOASTS = 3;
+function ensureStyles() {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = `
+    .sentinel-toast-wrap {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 2147483647;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .sentinel-toast {
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-left: 3px solid #E24B4A;
+      border-radius: 6px;
+      padding: 10px 36px 10px 12px;
+      max-width: 300px;
+      min-width: 220px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.12);
+      pointer-events: all;
+      animation: sentinel-slide-in .2s ease;
+      position: relative;
+    }
+    .sentinel-toast.warning { border-left-color: #EF9F27; }
+    .sentinel-toast.info    { border-left-color: #185FA5; }
+    @keyframes sentinel-slide-in {
+      from { opacity: 0; transform: translateX(12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes sentinel-slide-out {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(12px); }
+    }
+    .sentinel-toast.dismissing {
+      animation: sentinel-slide-out .18s ease forwards;
+    }
+    .sentinel-toast-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1a1a18;
+      margin-bottom: 2px;
+    }
+    .sentinel-toast-body {
+      font-size: 11px;
+      color: #555550;
+      line-height: 1.4;
+    }
+    .sentinel-toast-value {
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      font-size: 10px;
+      color: #888880;
+      margin-top: 3px;
+    }
+    .sentinel-toast-close {
+      position: absolute;
+      top: 7px;
+      right: 8px;
+      background: none;
+      border: none;
+      font-size: 15px;
+      cursor: pointer;
+      color: #b4b2a9;
+      line-height: 1;
+      padding: 0 2px;
+      border-radius: 3px;
+    }
+    .sentinel-toast-close:hover { color: #1a1a18; background: #f1efe8; }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+}
+function getOrCreateContainer() {
+  let wrap = document.getElementById("sentinel-toast-wrap");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "sentinel-toast-wrap";
+    wrap.className = "sentinel-toast-wrap";
+    (document.body || document.documentElement).appendChild(wrap);
+  }
+  return wrap;
+}
+function showFindingToast(finding) {
+  const toastId = `${TOAST_ID_PREFIX}${finding.patternId}`;
+  if (document.getElementById(toastId)) return;
+  ensureStyles();
+  const container = getOrCreateContainer();
+  const existing = container.querySelectorAll(".sentinel-toast");
+  if (existing.length >= MAX_TOASTS) {
+    dismissToast(existing[0]);
+  }
+  const severityClass = finding.severity === "warning" ? "warning" : finding.severity === "info" ? "info" : "";
+  const toast = document.createElement("div");
+  toast.id = toastId;
+  toast.className = `sentinel-toast ${severityClass}`.trim();
+  toast.setAttribute("role", "alert");
+  toast.setAttribute("aria-live", "assertive");
+  toast.innerHTML = `
+    <div class="sentinel-toast-title">🔑 Secret detected</div>
+    <div class="sentinel-toast-body">${escHtml(finding.patternName)}</div>
+    <div class="sentinel-toast-value">${escHtml(finding.redactedValue)}</div>
+    <button class="sentinel-toast-close" aria-label="Dismiss">&times;</button>
+  `;
+  toast.querySelector(".sentinel-toast-close").addEventListener("click", () => dismissToast(toast));
+  container.appendChild(toast);
+  setTimeout(() => dismissToast(toast), 8e3);
+}
+function dismissToast(el) {
+  if (!el.parentNode) return;
+  el.classList.add("dismissing");
+  setTimeout(() => {
+    var _a;
+    return (_a = el.parentNode) == null ? void 0 : _a.removeChild(el);
+  }, 200);
+}
+function escHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 async function init() {
   const tabId = await getTabId();
-  if (tabId === null) return;
-  const settings = await new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (response) => {
-      resolve((response == null ? void 0 : response.settings) ?? { enabled: true, disabledDomains: [] });
-    });
-  });
+  if (tabId === null || tabId === -1) return;
+  const settings = await getSettings();
   if (!settings.enabled) return;
   const hostname = window.location.hostname;
   const isDomainDisabled = settings.disabledDomains.some(
     (d) => hostname === d || hostname.endsWith("." + d)
   );
   if (isDomainDisabled) return;
-  setupMessageRelay(tabId);
-  injectMainWorldInterceptor();
+  interceptFetch(tabId);
+  interceptXHR(tabId);
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => startDomScanner(tabId));
+    document.addEventListener("DOMContentLoaded", () => startDomScanner(tabId), { once: true });
   } else {
     startDomScanner(tabId);
   }
-}
-function injectMainWorldInterceptor() {
-  const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("dist/intercept.js");
-  (document.head || document.documentElement).appendChild(script);
-  script.remove();
-}
-function setupMessageRelay(tabId) {
-  window.addEventListener("message", (event) => {
-    var _a;
-    if (event.source !== window || ((_a = event.data) == null ? void 0 : _a.source) !== "ACCIDENTAL_SECRET_SENTINEL_MAIN") {
-      return;
-    }
-    if (event.data.type === "FINDING_DETECTED") {
-      const finding = { ...event.data.finding, tabId };
-      chrome.runtime.sendMessage({
-        type: "FINDING_DETECTED",
-        finding
-      });
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === "FINDING_DETECTED" && message.finding.tabId === tabId) {
+      handleFinding(message.finding);
     }
   });
 }
+let domScanner = null;
 function startDomScanner(tabId) {
-  const scanner = new DomScanner(tabId);
-  scanner.start();
-  window.addEventListener("beforeunload", () => scanner.stop());
+  domScanner = new DomScanner(tabId);
+  domScanner.start();
+  window.addEventListener("beforeunload", () => {
+    domScanner == null ? void 0 : domScanner.stop();
+    domScanner = null;
+  }, { once: true });
+}
+const shownPatterns = /* @__PURE__ */ new Set();
+function handleFinding(finding) {
+  if (!shownPatterns.has(finding.patternId)) {
+    shownPatterns.add(finding.patternId);
+    showFindingToast(finding);
+  }
 }
 async function getTabId() {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage({ type: "GET_TAB_ID" }, (response) => {
-        if (chrome.runtime.lastError) {
+        if (chrome.runtime.lastError || !response) {
           resolve(null);
           return;
         }
-        resolve((response == null ? void 0 : response.tabId) ?? null);
+        resolve(response.tabId ?? null);
       });
     } catch {
       resolve(null);
     }
   });
 }
-init().catch((err) => console.warn("[Sentinel] Content script init failed:", err));
+async function getSettings() {
+  return new Promise((resolve) => {
+    const fallback = { enabled: true, disabledDomains: [] };
+    try {
+      chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (response) => {
+        if (chrome.runtime.lastError || !response) {
+          resolve(fallback);
+          return;
+        }
+        resolve(response.settings ?? fallback);
+      });
+    } catch {
+      resolve(fallback);
+    }
+  });
+}
+init().catch((err) => console.warn("[Sentinel] init error:", err));
 //# sourceMappingURL=content.js.map
