@@ -7,8 +7,7 @@ async function init() {
   currentTabId = tab.id;
   const settingsRes = await sendMessage({ type: "GET_SETTINGS" });
   const enabled = ((_a = settingsRes == null ? void 0 : settingsRes.settings) == null ? void 0 : _a.enabled) ?? true;
-  document.getElementById("enabled-toggle").checked = enabled;
-  updateToggleLabel(enabled);
+  setToggleState(enabled);
   const findingsRes = await sendMessage({
     type: "GET_FINDINGS",
     tabId: currentTabId
@@ -19,6 +18,12 @@ async function init() {
     if (message.type === "FINDING_DETECTED" && message.finding.tabId === currentTabId) {
       findings = [...findings, message.finding];
       render();
+    }
+    if (message.type === "SUPPRESSION_ADDED") {
+      sendMessage({ type: "GET_FINDINGS", tabId: currentTabId }).then((res) => {
+        findings = (res == null ? void 0 : res.findings) ?? [];
+        render();
+      });
     }
   });
   document.getElementById("enabled-toggle").addEventListener("change", onToggle);
@@ -36,45 +41,69 @@ function render() {
     countText.textContent = "No secrets detected on this page";
     btnClear.style.display = "none";
     list.innerHTML = `
-      <div class="empty">
-        <div class="empty-icon">🛡️</div>
+      <div class="empty" role="status">
+        <span class="empty-icon" aria-hidden="true">🛡️</span>
         <div class="empty-title">All clear</div>
-        <div class="empty-sub">No exposed secrets detected.<br>Browse normally — Sentinel is watching.</div>
+        <div class="empty-sub">No exposed secrets detected.<br>Sentinel is watching.</div>
       </div>`;
     return;
   }
   const critCount = findings.filter((f) => f.severity === "critical").length;
-  countText.textContent = `${findings.length} finding${findings.length !== 1 ? "s" : ""}${critCount > 0 ? ` (${critCount} critical)` : ""}`;
+  const label = `${findings.length} finding${findings.length !== 1 ? "s" : ""}${critCount > 0 ? ` (${critCount} critical)` : ""}`;
+  countText.textContent = label;
   btnClear.style.display = "block";
-  list.innerHTML = findings.sort((a, b) => {
+  const sorted = findings.slice().sort((a, b) => {
     const order = { critical: 0, warning: 1, info: 2 };
     return (order[a.severity] ?? 3) - (order[b.severity] ?? 3);
-  }).map((f) => findingHtml(f)).join("");
+  });
+  list.innerHTML = sorted.map((f) => findingHtml(f)).join("");
   list.querySelectorAll(".finding").forEach((el) => {
     el.addEventListener("click", (e) => {
-      const target = e.currentTarget;
-      target.classList.toggle("expanded");
+      if (e.target.closest(".btn-suppress")) return;
+      toggleExpand(el);
+    });
+    el.addEventListener("keydown", (e) => {
+      const ke = e;
+      if (ke.key === "Enter" || ke.key === " ") {
+        if (e.target.closest(".btn-suppress")) return;
+        e.preventDefault();
+        toggleExpand(el);
+      }
     });
   });
   list.querySelectorAll(".btn-suppress").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const kind = btn.dataset["kind"];
-      const findingId = btn.dataset["findingId"];
-      const finding = findings.find((f) => f.id === findingId);
+      const fid = btn.dataset["findingId"];
+      const finding = findings.find((f) => f.id === fid);
       if (!finding) return;
+      let value;
+      if (kind === "value-hash") value = finding.valueHash;
+      else if (kind === "pattern") value = finding.patternId;
+      else {
+        try {
+          value = new URL(finding.url).hostname;
+        } catch {
+          value = finding.url;
+        }
+      }
       await sendMessage({
         type: "SUPPRESS",
         suppression: {
           kind,
-          value: kind === "value-hash" ? finding.valueHash : kind === "pattern" ? finding.patternId : new URL(finding.url).hostname,
+          value,
           label: `${finding.patternName} — ${finding.redactedValue}`
         }
       });
-      findings = findings.filter((f) => f.id !== findingId);
+      findings = findings.filter((f) => f.id !== fid);
       render();
     });
   });
+}
+function toggleExpand(el) {
+  const expanded = el.classList.toggle("expanded");
+  el.setAttribute("aria-expanded", String(expanded));
 }
 function findingHtml(f) {
   const time = new Date(f.timestamp).toLocaleTimeString();
@@ -83,30 +112,62 @@ function findingHtml(f) {
     hostname = new URL(f.url).hostname;
   } catch {
   }
+  const chevron = `<span class="chevron" aria-hidden="true">
+    <svg viewBox="0 0 10 10"><polyline points="2,3 5,7 8,3"/></svg>
+  </span>`;
   return `
-    <div class="finding" data-id="${f.id}">
+    <div class="finding"
+         data-id="${esc(f.id)}"
+         role="button"
+         tabindex="0"
+         aria-expanded="false"
+         aria-label="${esc(f.patternName)}, ${esc(f.severity)}, detected on ${esc(hostname)}">
       <div class="finding-header">
-        <span class="finding-name">${escape(f.patternName)}</span>
-        <span class="severity severity-${f.severity}">${f.severity.toUpperCase()}</span>
+        <div class="finding-left">
+          <div class="finding-name">${esc(f.patternName)}</div>
+          <div class="finding-value" aria-label="Detected value: ${esc(f.redactedValue)}">${esc(f.redactedValue)}</div>
+          <div class="finding-meta">${esc(sourceLabel(f.sourceType))} · ${esc(hostname)}</div>
+        </div>
+        <div class="finding-right">
+          <span class="severity severity-${esc(f.severity)}" aria-label="Severity: ${esc(f.severity)}">${esc(f.severity.toUpperCase())}</span>
+          ${chevron}
+        </div>
       </div>
-      <div class="finding-value">${escape(f.redactedValue)}</div>
-      <div class="finding-meta">${escape(sourceLabel(f.sourceType))} · ${escape(hostname)}</div>
-      <div class="finding-detail">
-        <div class="detail-row"><span class="detail-label">Source</span><span>${escape(sourceLabel(f.sourceType))}</span></div>
-        <div class="detail-row"><span class="detail-label">URL</span><span style="word-break:break-all">${escape(f.url)}</span></div>
-        <div class="detail-row"><span class="detail-label">Entropy</span><span>${f.entropy.toFixed(2)}</span></div>
-        <div class="detail-row"><span class="detail-label">Detected</span><span>${time}</span></div>
-        <div class="suppress-row">
-          <button class="btn-suppress" data-kind="value-hash" data-finding-id="${f.id}">Suppress this value</button>
-          <button class="btn-suppress" data-kind="domain" data-finding-id="${f.id}">Suppress domain</button>
-          <button class="btn-suppress" data-kind="pattern" data-finding-id="${f.id}">Suppress all ${escape(f.patternName)}</button>
+      <div class="finding-detail" role="region" aria-label="Details for ${esc(f.patternName)}">
+        <div class="detail-grid">
+          <span class="detail-label">Source</span>
+          <span class="detail-value">${esc(sourceLabel(f.sourceType))}</span>
+          <span class="detail-label">URL</span>
+          <span class="detail-value">${esc(f.url)}</span>
+          <span class="detail-label">Entropy</span>
+          <span class="detail-value">${f.entropy.toFixed(2)} bits</span>
+          <span class="detail-label">Time</span>
+          <span class="detail-value">${esc(time)}</span>
+        </div>
+        <div class="suppress-row" role="group" aria-label="Suppress options">
+          <span class="suppress-label">Suppress</span>
+          <button class="btn-suppress"
+                  data-kind="value-hash" data-finding-id="${esc(f.id)}"
+                  aria-label="Suppress this specific value of ${esc(f.patternName)}">
+            This value
+          </button>
+          <button class="btn-suppress"
+                  data-kind="domain" data-finding-id="${esc(f.id)}"
+                  aria-label="Suppress all findings on ${esc(hostname)}">
+            This domain
+          </button>
+          <button class="btn-suppress"
+                  data-kind="pattern" data-finding-id="${esc(f.id)}"
+                  aria-label="Suppress all ${esc(f.patternName)} findings">
+            All ${esc(f.patternName)}
+          </button>
         </div>
       </div>
     </div>`;
 }
 async function onToggle(e) {
   const enabled = e.target.checked;
-  updateToggleLabel(enabled);
+  setToggleState(enabled);
   await sendMessage({ type: "UPDATE_SETTINGS", settings: { enabled } });
 }
 async function onClearAll() {
@@ -123,9 +184,14 @@ function onExport() {
   a.click();
   URL.revokeObjectURL(url);
 }
-function updateToggleLabel(enabled) {
+function setToggleState(enabled) {
+  const toggle = document.getElementById("enabled-toggle");
   const label = document.getElementById("toggle-label");
+  const banner = document.getElementById("disabled-banner");
+  toggle.checked = enabled;
+  toggle.setAttribute("aria-checked", String(enabled));
   if (label) label.textContent = enabled ? "On" : "Off";
+  if (banner) banner.classList.toggle("visible", !enabled);
 }
 function sourceLabel(s) {
   const map = {
@@ -139,7 +205,7 @@ function sourceLabel(s) {
   };
   return map[s] ?? s;
 }
-function escape(str) {
+function esc(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 function sendMessage(message) {
