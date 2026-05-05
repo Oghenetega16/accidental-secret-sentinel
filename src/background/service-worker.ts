@@ -6,30 +6,30 @@ import {
   addFinding,
   clearFindings,
   getFindingCount,
+  addSuppression,
+  removeSuppression,
+  purgeSuppressedFindings,
 } from './storage';
 import { isSuppressed } from '../shared/allowlist';
 
-// ─── Service worker lifecycle ─────────────────────────────────────────────────
 // MV3 service workers terminate after ~30s of inactivity.
 // All state lives in chrome.storage — never rely on in-memory variables.
 
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Sentinel] Extension installed / updated.');
-  // Initialise storage with defaults if not already set
   const settings = await getSettings();
-  await updateSettings(settings); // write defaults back if keys were missing
+  await updateSettings(settings); // write defaults if keys were missing
 });
 
 // ─── Message handler ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
   (message: Message, sender, sendResponse) => {
-    // Must return true to keep the message channel open for async responses
     handleMessage(message, sender).then(sendResponse).catch(err => {
       console.error('[Sentinel] Message handler error:', err);
       sendResponse(null);
     });
-    return true;
+    return true; // keep channel open for async response
   }
 );
 
@@ -53,11 +53,19 @@ async function handleMessage(
       await addFinding(finding);
       await updateBadge(finding.tabId);
 
-      // Notify the popup if it's open
+      // Broadcast to popup (if open)
       chrome.runtime.sendMessage({
         type: 'FINDING_DETECTED',
         finding,
-      }).catch(() => { /* popup not open — ignore */ });
+      }).catch(() => {});
+
+      // Broadcast back to the tab so the content script can show a toast
+      if (finding.tabId > 0) {
+        chrome.tabs.sendMessage(finding.tabId, {
+          type: 'FINDING_DETECTED',
+          finding,
+        }).catch(() => {});
+      }
 
       return null;
     }
@@ -68,15 +76,37 @@ async function handleMessage(
     }
 
     case 'SUPPRESS': {
-      const settings = await getSettings();
-      const suppression: Suppression = {
-        ...message.suppression,
-        id: crypto.randomUUID(),
-        createdAt: Date.now(),
-      };
-      await updateSettings({
-        suppressions: [...settings.suppressions, suppression],
-      });
+      const sup = message.suppression;
+      const result = await addSuppression(sup);
+
+      if (result.added) {
+        // Purge any already-stored findings that match this suppression
+        await purgeSuppressedFindings(sup);
+
+        // Notify popup of updated badge counts
+        const settings = await getSettings();
+        const lastSuppression = settings.suppressions.at(-1);
+
+        if (lastSuppression) {
+          // Re-broadcast updated findings to popup
+          chrome.runtime.sendMessage({
+            type: 'SUPPRESSION_ADDED',
+            suppression: lastSuppression,
+          } as any).catch(() => {});
+        }
+
+        // Refresh badge for all windows
+        const tabs = await chrome.tabs.query({});
+        for (const tab of tabs) {
+          if (tab.id) await updateBadge(tab.id);
+        }
+      }
+
+      return { added: result.added, reason: result.reason };
+    }
+
+    case 'REMOVE_SUPPRESSION': {
+      await removeSuppression((message as any).suppressionId);
       return null;
     }
 
@@ -105,7 +135,6 @@ async function handleMessage(
 
 async function updateBadge(tabId: number): Promise<void> {
   const count = await getFindingCount(tabId);
-
   if (count === 0) {
     await chrome.action.setBadgeText({ text: '', tabId });
   } else {
@@ -113,18 +142,14 @@ async function updateBadge(tabId: number): Promise<void> {
       text: count > 99 ? '99+' : String(count),
       tabId,
     });
-    await chrome.action.setBadgeBackgroundColor({
-      color: count > 0 ? '#E24B4A' : '#888780',
-      tabId,
-    });
+    await chrome.action.setBadgeBackgroundColor({ color: '#E24B4A', tabId });
   }
 }
 
-// ─── Tab lifecycle — clear findings when tab navigates ────────────────────────
+// ─── Tab lifecycle ─────────────────────────────────────────────────────────────
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.status === 'loading' && changeInfo.url) {
-    // New navigation — clear previous findings for this tab
     await clearFindings(tabId);
     await updateBadge(tabId);
   }
