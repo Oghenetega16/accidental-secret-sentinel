@@ -18,6 +18,8 @@ export default defineConfig({
         content:    resolve(__dirname, 'src/content/content.ts'),
         popup:      resolve(__dirname, 'src/popup/popup.ts'),
         panel:      resolve(__dirname, 'src/devtools/panel.ts'),
+        options:    resolve(__dirname, 'src/options/options.ts'),
+        relay:      resolve(__dirname, 'src/content/relay.ts'),
       },
       output: {
         entryFileNames: '[name].js',

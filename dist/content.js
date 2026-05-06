@@ -366,131 +366,6 @@ function scan(input, opts) {
   }
   return results;
 }
-const TOAST_ID_PREFIX = "sentinel-toast-";
-const STYLE_ID = "sentinel-toast-styles";
-const MAX_TOASTS = 3;
-function ensureStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = `
-    .sentinel-toast-wrap {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      z-index: 2147483647;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      pointer-events: none;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    .sentinel-toast {
-      background: #fff;
-      border: 1px solid #e8e6e0;
-      border-left: 3px solid #E24B4A;
-      border-radius: 6px;
-      padding: 10px 36px 10px 12px;
-      max-width: 300px;
-      min-width: 220px;
-      box-shadow: 0 4px 12px rgba(0,0,0,.12);
-      pointer-events: all;
-      animation: sentinel-slide-in .2s ease;
-      position: relative;
-    }
-    .sentinel-toast.warning { border-left-color: #EF9F27; }
-    .sentinel-toast.info    { border-left-color: #185FA5; }
-    @keyframes sentinel-slide-in {
-      from { opacity: 0; transform: translateX(12px); }
-      to   { opacity: 1; transform: translateX(0); }
-    }
-    @keyframes sentinel-slide-out {
-      from { opacity: 1; transform: translateX(0); }
-      to   { opacity: 0; transform: translateX(12px); }
-    }
-    .sentinel-toast.dismissing {
-      animation: sentinel-slide-out .18s ease forwards;
-    }
-    .sentinel-toast-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: #1a1a18;
-      margin-bottom: 2px;
-    }
-    .sentinel-toast-body {
-      font-size: 11px;
-      color: #555550;
-      line-height: 1.4;
-    }
-    .sentinel-toast-value {
-      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
-      font-size: 10px;
-      color: #888880;
-      margin-top: 3px;
-    }
-    .sentinel-toast-close {
-      position: absolute;
-      top: 7px;
-      right: 8px;
-      background: none;
-      border: none;
-      font-size: 15px;
-      cursor: pointer;
-      color: #b4b2a9;
-      line-height: 1;
-      padding: 0 2px;
-      border-radius: 3px;
-    }
-    .sentinel-toast-close:hover { color: #1a1a18; background: #f1efe8; }
-  `;
-  (document.head || document.documentElement).appendChild(style);
-}
-function getOrCreateContainer() {
-  let wrap = document.getElementById("sentinel-toast-wrap");
-  if (!wrap) {
-    wrap = document.createElement("div");
-    wrap.id = "sentinel-toast-wrap";
-    wrap.className = "sentinel-toast-wrap";
-    (document.body || document.documentElement).appendChild(wrap);
-  }
-  return wrap;
-}
-function showFindingToast(finding) {
-  const toastId = `${TOAST_ID_PREFIX}${finding.patternId}`;
-  if (document.getElementById(toastId)) return;
-  ensureStyles();
-  const container = getOrCreateContainer();
-  const existing = container.querySelectorAll(".sentinel-toast");
-  if (existing.length >= MAX_TOASTS) {
-    dismissToast(existing[0]);
-  }
-  const severityClass = finding.severity === "warning" ? "warning" : finding.severity === "info" ? "info" : "";
-  const toast = document.createElement("div");
-  toast.id = toastId;
-  toast.className = `sentinel-toast ${severityClass}`.trim();
-  toast.setAttribute("role", "alert");
-  toast.setAttribute("aria-live", "assertive");
-  toast.innerHTML = `
-    <div class="sentinel-toast-title">🔑 Secret detected</div>
-    <div class="sentinel-toast-body">${escHtml(finding.patternName)}</div>
-    <div class="sentinel-toast-value">${escHtml(finding.redactedValue)}</div>
-    <button class="sentinel-toast-close" aria-label="Dismiss">&times;</button>
-  `;
-  toast.querySelector(".sentinel-toast-close").addEventListener("click", () => dismissToast(toast));
-  container.appendChild(toast);
-  setTimeout(() => dismissToast(toast), 8e3);
-}
-function dismissToast(el) {
-  if (!el.parentNode) return;
-  el.classList.add("dismissing");
-  setTimeout(() => {
-    var _a;
-    return (_a = el.parentNode) == null ? void 0 : _a.removeChild(el);
-  }, 200);
-}
-function escHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 function interceptFetch(tabId) {
   const originalFetch = window.fetch.bind(window);
   window.fetch = async function(input, init2) {
@@ -538,7 +413,6 @@ function interceptXHR(tabId) {
     }
   };
 }
-const shownPatterns$1 = /* @__PURE__ */ new Set();
 function emitFindings(input, url, tabId, sourceType) {
   if (!input || input.length < 8) return;
   const MAX_INLINE = 5e4;
@@ -547,15 +421,7 @@ function emitFindings(input, url, tabId, sourceType) {
   if (rawFindings.length === 0) return;
   Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
     for (const finding of findings) {
-      chrome.runtime.sendMessage(
-        { type: "FINDING_DETECTED", finding },
-        (response) => {
-          if ((response == null ? void 0 : response.stored) && !shownPatterns$1.has(finding.patternId)) {
-            shownPatterns$1.add(finding.patternId);
-            showFindingToast(finding);
-          }
-        }
-      );
+      chrome.runtime.sendMessage({ type: "FINDING_DETECTED", finding });
     }
   }).catch((err) => console.warn("[Sentinel] emit error:", err));
 }
@@ -564,7 +430,6 @@ class DomScanner {
     __publicField(this, "tabId");
     __publicField(this, "observer", null);
     __publicField(this, "scannedUrls", /* @__PURE__ */ new Set());
-    __publicField(this, "shownPatterns", /* @__PURE__ */ new Set());
     this.tabId = tabId;
   }
   start() {
@@ -572,9 +437,7 @@ class DomScanner {
     this.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of Array.from(mutation.addedNodes)) {
-          if (node instanceof HTMLScriptElement) {
-            this.handleScriptTag(node);
-          }
+          if (node instanceof HTMLScriptElement) this.handleScriptTag(node);
           if (node instanceof Element) {
             node.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
           }
@@ -631,19 +494,104 @@ class DomScanner {
     if (!rawFindings.length) return;
     Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
       for (const finding of findings) {
-        chrome.runtime.sendMessage(
-          { type: "FINDING_DETECTED", finding },
-          (response) => {
-            if ((response == null ? void 0 : response.stored) && !this.shownPatterns.has(finding.patternId)) {
-              this.shownPatterns.add(finding.patternId);
-              showFindingToast(finding);
-            }
-          }
-        );
+        chrome.runtime.sendMessage({ type: "FINDING_DETECTED", finding });
       }
     }).catch((err) => console.warn("[Sentinel] scan error:", err));
   }
 }
+const TOAST_ID = "sentinel-toast-main";
+const STYLE_ID = "sentinel-toast-styles";
+const AUTO_CLOSE = 6e3;
+let toastCount = 0;
+let autoCloseTimer = null;
+function ensureStyles() {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = `
+    #sentinel-toast-main {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 2147483647;
+      background: #fff;
+      border: 1px solid #e8e6e0;
+      border-left: 3px solid #E24B4A;
+      border-radius: 6px;
+      padding: 10px 36px 10px 12px;
+      min-width: 220px;
+      max-width: 300px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.14);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      animation: sentinel-in .2s ease;
+      pointer-events: all;
+    }
+    @keyframes sentinel-in {
+      from { opacity: 0; transform: translateX(10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes sentinel-out {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(10px); }
+    }
+    #sentinel-toast-main.closing {
+      animation: sentinel-out .18s ease forwards;
+    }
+    #sentinel-toast-main .s-title {
+      font-size: 12px; font-weight: 600; color: #1a1a18; margin-bottom: 2px;
+    }
+    #sentinel-toast-main .s-body {
+      font-size: 11px; color: #555550; line-height: 1.4;
+    }
+    #sentinel-toast-main .s-close {
+      position: absolute; top: 8px; right: 8px;
+      background: none; border: none; font-size: 15px;
+      cursor: pointer; color: #b4b2a9; line-height: 1; padding: 0 2px;
+    }
+    #sentinel-toast-main .s-close:hover { color: #1a1a18; }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+}
+function showFindingToast(finding) {
+  toastCount++;
+  ensureStyles();
+  const existing = document.getElementById(TOAST_ID);
+  if (existing) {
+    const body = existing.querySelector(".s-body");
+    if (body) {
+      body.textContent = toastCount === 1 ? `${finding.patternName} — click the extension badge to view.` : `${toastCount} secrets detected — click the extension badge to view all.`;
+    }
+    if (autoCloseTimer) clearTimeout(autoCloseTimer);
+    autoCloseTimer = setTimeout(() => dismissToast(), AUTO_CLOSE);
+    return;
+  }
+  const toast = document.createElement("div");
+  toast.id = TOAST_ID;
+  toast.setAttribute("role", "alert");
+  toast.setAttribute("aria-live", "assertive");
+  toast.innerHTML = `
+    <div class="s-title">🔑 Secret detected</div>
+    <div class="s-body">${escHtml(finding.patternName)} — click the extension badge to view.</div>
+    <button class="s-close" aria-label="Dismiss">&times;</button>
+  `;
+  toast.querySelector(".s-close").addEventListener("click", dismissToast);
+  (document.body || document.documentElement).appendChild(toast);
+  if (autoCloseTimer) clearTimeout(autoCloseTimer);
+  autoCloseTimer = setTimeout(() => dismissToast(), AUTO_CLOSE);
+}
+function dismissToast() {
+  const toast = document.getElementById(TOAST_ID);
+  if (!toast) return;
+  toast.classList.add("closing");
+  setTimeout(() => {
+    var _a;
+    return (_a = toast.parentNode) == null ? void 0 : _a.removeChild(toast);
+  }, 200);
+}
+function escHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+const SENTINEL_MSG_KEY = "__sentinel_finding__";
 async function init() {
   const tabId = await getTabId();
   if (tabId === null || tabId === -1) return;
@@ -661,9 +609,10 @@ async function init() {
   } else {
     startDomScanner(tabId);
   }
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === "FINDING_DETECTED" && message.finding.tabId === tabId) {
-      handleFinding(message.finding);
+  window.addEventListener("message", (event) => {
+    var _a;
+    if (event.source === window && ((_a = event.data) == null ? void 0 : _a[SENTINEL_MSG_KEY]) === true) {
+      handleFinding(event.data.finding);
     }
   });
 }

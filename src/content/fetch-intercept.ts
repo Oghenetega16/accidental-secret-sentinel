@@ -1,16 +1,11 @@
 import type { SourceType } from '../shared/types';
 import { scan } from '../engine/scanner';
-import { showFindingToast } from './toast';
 
 /**
- * Monkey-patches window.fetch and XMLHttpRequest to intercept
- * request/response data for scanning.
- *
- * Runs in MAIN world. Uses the sendMessage response callback to
- * trigger toasts — chrome.tabs.sendMessage does NOT reach MAIN world.
+ * Monkey-patches window.fetch and XMLHttpRequest.
+ * Runs in MAIN world — sends findings to the service worker only.
+ * Toast display is handled by content.ts via the relay postMessage bridge.
  */
-
-// ─── fetch interception ───────────────────────────────────────────────────────
 
 export function interceptFetch(tabId: number): void {
   const originalFetch = window.fetch.bind(window);
@@ -35,7 +30,6 @@ export function interceptFetch(tabId: number): void {
     clone.text()
       .then(body => {
         emitFindings(body, url, tabId, 'response-body');
-        // Headers.entries() cast — not in all TS DOM lib versions
         const headerStr = JSON.stringify(Object.fromEntries((response.headers as any)));
         emitFindings(headerStr, url, tabId, 'response-header');
       })
@@ -44,8 +38,6 @@ export function interceptFetch(tabId: number): void {
     return response;
   };
 }
-
-// ─── XHR interception ────────────────────────────────────────────────────────
 
 export function interceptXHR(tabId: number): void {
   const OriginalXHR = window.XMLHttpRequest;
@@ -74,38 +66,23 @@ export function interceptXHR(tabId: number): void {
   } as typeof XMLHttpRequest;
 }
 
-// ─── Finding emitter ──────────────────────────────────────────────────────────
+// ─── Emitter — scan and send to service worker ────────────────────────────────
 
-const shownPatterns = new Set<string>();
-
-function emitFindings(
-  input: string,
-  url: string,
-  tabId: number,
-  sourceType: SourceType
-): void {
+function emitFindings(input: string, url: string, tabId: number, sourceType: SourceType): void {
   if (!input || input.length < 8) return;
 
   const MAX_INLINE = 50_000;
   const chunk = input.length > MAX_INLINE ? input.slice(0, MAX_INLINE) : input;
-
   const rawFindings = scan(chunk, { url, tabId, sourceType });
   if (rawFindings.length === 0) return;
 
   Promise.all(rawFindings.map(r => r.toFinding()))
     .then(findings => {
       for (const finding of findings) {
-        chrome.runtime.sendMessage(
-          { type: 'FINDING_DETECTED', finding },
-          (response) => {
-            // response.stored === true means the service worker accepted it
-            // (not suppressed, not duplicate). Show toast here in MAIN world.
-            if (response?.stored && !shownPatterns.has(finding.patternId)) {
-              shownPatterns.add(finding.patternId);
-              showFindingToast(finding);
-            }
-          }
-        );
+        // Send to service worker — it stores, updates badge, and relays
+        // back via chrome.tabs.sendMessage → relay.ts → window.postMessage
+        // → content.ts → showFindingToast
+        chrome.runtime.sendMessage({ type: 'FINDING_DETECTED', finding });
       }
     })
     .catch(err => console.warn('[Sentinel] emit error:', err));

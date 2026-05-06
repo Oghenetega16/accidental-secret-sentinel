@@ -24,10 +24,25 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["dist/content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/relay.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
     }
   ],
   "action": {
@@ -39,10 +54,15 @@
     }
   },
   "devtools_page": "devtools.html",
+  "options_page": "options.html",
   "web_accessible_resources": [
     {
-      "resources": ["dist/intercept.js"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "dist/content.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

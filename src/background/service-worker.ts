@@ -59,10 +59,16 @@ async function handleMessage(
         finding,
       }).catch(() => {});
 
-      // Return stored:true + finding so the content script's sendMessage
-      // callback can trigger the toast directly in MAIN world.
-      // chrome.tabs.sendMessage does NOT reach MAIN world content scripts.
-      return { stored: true, finding };
+      // Forward to the tab's relay.ts (ISOLATED world) which bridges
+      // to MAIN world via window.postMessage so the toast can fire.
+      if (finding.tabId > 0) {
+        chrome.tabs.sendMessage(finding.tabId, {
+          type: 'FINDING_DETECTED',
+          finding,
+        }).catch(() => {});
+      }
+
+      return null;
     }
 
     case 'GET_FINDINGS': {
@@ -133,7 +139,9 @@ async function updateBadge(tabId: number): Promise<void> {
 // ─── Tab lifecycle ─────────────────────────────────────────────────────────────
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
-  if (changeInfo.status === 'loading' && changeInfo.url) {
+  // Clear on any loading event — including same-page refresh where
+  // changeInfo.url is undefined because the URL did not change.
+  if (changeInfo.status === 'loading') {
     await clearFindings(tabId);
     await updateBadge(tabId);
   }

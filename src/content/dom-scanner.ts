@@ -1,35 +1,27 @@
 import { scan } from '../engine/scanner';
-import { showFindingToast } from './toast';
 import type { SourceType } from '../shared/types';
 
 /**
- * Scans the page's HTML source and watches for dynamically injected
- * <script> tags using MutationObserver.
- *
- * Toast is shown via the sendMessage response callback — the only
- * reliable way to trigger UI from a MAIN world content script.
+ * Scans HTML source and dynamically injected <script> tags.
+ * Sends findings to service worker only — toast is handled by the
+ * relay → postMessage → content.ts pipeline.
  */
 export class DomScanner {
   private tabId: number;
   private observer: MutationObserver | null = null;
   private scannedUrls = new Set<string>();
-  private shownPatterns = new Set<string>();
 
   constructor(tabId: number) {
     this.tabId = tabId;
   }
 
   start(): void {
-    // Scan initial HTML
     this.scanText(document.documentElement.outerHTML, 'html-source', window.location.href);
 
-    // Watch for dynamically added script tags
     this.observer = new MutationObserver(mutations => {
       for (const mutation of mutations) {
         for (const node of Array.from(mutation.addedNodes)) {
-          if (node instanceof HTMLScriptElement) {
-            this.handleScriptTag(node);
-          }
+          if (node instanceof HTMLScriptElement) this.handleScriptTag(node);
           if (node instanceof Element) {
             node.querySelectorAll('script').forEach(s => this.handleScriptTag(s));
           }
@@ -38,8 +30,6 @@ export class DomScanner {
     });
 
     this.observer.observe(document.documentElement, { childList: true, subtree: true });
-
-    // Scan scripts already in DOM
     document.querySelectorAll('script').forEach(s => this.handleScriptTag(s));
   }
 
@@ -94,17 +84,7 @@ export class DomScanner {
     Promise.all(rawFindings.map(r => r.toFinding()))
       .then(findings => {
         for (const finding of findings) {
-          chrome.runtime.sendMessage(
-            { type: 'FINDING_DETECTED', finding },
-            (response) => {
-              // Show toast only if service worker stored the finding
-              // (not suppressed, not a duplicate)
-              if (response?.stored && !this.shownPatterns.has(finding.patternId)) {
-                this.shownPatterns.add(finding.patternId);
-                showFindingToast(finding);
-              }
-            }
-          );
+          chrome.runtime.sendMessage({ type: 'FINDING_DETECTED', finding });
         }
       })
       .catch(err => console.warn('[Sentinel] scan error:', err));

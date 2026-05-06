@@ -146,7 +146,14 @@ async function handleMessage(message, sender) {
         finding
       }).catch(() => {
       });
-      return { stored: true, finding };
+      if (finding.tabId > 0) {
+        chrome.tabs.sendMessage(finding.tabId, {
+          type: "FINDING_DETECTED",
+          finding
+        }).catch(() => {
+        });
+      }
+      return null;
     }
     case "GET_FINDINGS": {
       const findings = await getFindings(message.tabId);
@@ -203,7 +210,7 @@ async function updateBadge(tabId) {
   }
 }
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
-  if (changeInfo.status === "loading" && changeInfo.url) {
+  if (changeInfo.status === "loading") {
     await clearFindings(tabId);
     await updateBadge(tabId);
   }

@@ -1,18 +1,21 @@
 /**
- * Content script — runs at document_start in the MAIN world.
+ * content.ts — MAIN world entry point.
  *
- * Execution order:
- * 1. Negotiate tab ID with the service worker
- * 2. Check global enabled flag + domain allowlist
- * 3. Patch fetch + XHR immediately (before any page JS runs)
- * 4. Start DOM scanner after DOMContentLoaded
- * 5. Listen for findings echoed back from the service worker and show toasts
+ * Communication architecture:
+ *   MAIN world → service worker : chrome.runtime.sendMessage (works fine)
+ *   service worker → MAIN world : chrome.tabs.sendMessage → relay.ts (ISOLATED)
+ *                                 → window.postMessage → this file
+ *
+ * chrome.tabs.sendMessage cannot reach MAIN world directly — the relay
+ * script bridges the gap.
  */
 
 import { interceptFetch, interceptXHR } from './fetch-intercept';
 import { DomScanner } from './dom-scanner';
 import { showFindingToast } from './toast';
-import type { Finding, Message } from '../shared/types';
+import type { Finding } from '../shared/types';
+
+const SENTINEL_MSG_KEY = '__sentinel_finding__';
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -29,7 +32,7 @@ async function init(): Promise<void> {
   );
   if (isDomainDisabled) return;
 
-  // Patch fetch + XHR before any page script runs (document_start)
+  // Patch fetch + XHR before any page script runs
   interceptFetch(tabId);
   interceptXHR(tabId);
 
@@ -40,10 +43,14 @@ async function init(): Promise<void> {
     startDomScanner(tabId);
   }
 
-  // Listen for findings echoed back from service worker → show toasts
-  chrome.runtime.onMessage.addListener((message: Message) => {
-    if (message.type === 'FINDING_DETECTED' && message.finding.tabId === tabId) {
-      handleFinding(message.finding);
+  // Listen for findings forwarded by relay.ts via window.postMessage
+  // This is the only reliable way to receive messages in MAIN world.
+  window.addEventListener('message', (event) => {
+    if (
+      event.source === window &&
+      event.data?.[SENTINEL_MSG_KEY] === true
+    ) {
+      handleFinding(event.data.finding as Finding);
     }
   });
 }
@@ -63,6 +70,8 @@ function startDomScanner(tabId: number): void {
 
 // ─── Finding handler ──────────────────────────────────────────────────────────
 
+// One toast per pattern per page load — relay may fire multiple times
+// for the same pattern if the popup is also open.
 const shownPatterns = new Set<string>();
 
 function handleFinding(finding: Finding): void {
@@ -97,5 +106,4 @@ async function getSettings(): Promise<{ enabled: boolean; disabledDomains: strin
   });
 }
 
-// Boot
 init().catch(err => console.warn('[Sentinel] init error:', err));
