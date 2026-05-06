@@ -366,148 +366,6 @@ function scan(input, opts) {
   }
   return results;
 }
-function interceptFetch(tabId) {
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async function(input, init2) {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (init2 == null ? void 0 : init2.headers) {
-      const headerStr = JSON.stringify(init2.headers);
-      emitFindings(headerStr, url, tabId, "request-header");
-    }
-    if ((init2 == null ? void 0 : init2.body) && typeof init2.body === "string") {
-      emitFindings(init2.body, url, tabId, "request-body");
-    }
-    const response = await originalFetch(input, init2);
-    const clone = response.clone();
-    clone.text().then((body) => {
-      emitFindings(body, url, tabId, "response-body");
-      const headerStr = JSON.stringify(Object.fromEntries(response.headers));
-      emitFindings(headerStr, url, tabId, "response-header");
-    }).catch(() => {
-    });
-    return response;
-  };
-}
-function interceptXHR(tabId) {
-  const OriginalXHR = window.XMLHttpRequest;
-  window.XMLHttpRequest = class extends OriginalXHR {
-    constructor() {
-      super(...arguments);
-      __publicField(this, "_url", "");
-    }
-    open(method, url, async, user, password) {
-      this._url = url.toString();
-      super.open(method, url.toString(), async ?? true, user, password);
-    }
-    send(body) {
-      if (body && typeof body === "string") {
-        emitFindings(body, this._url, tabId, "request-body");
-      }
-      this.addEventListener("load", () => {
-        if (typeof this.responseText === "string") {
-          emitFindings(this.responseText, this._url, tabId, "response-body");
-        }
-        const headers = this.getAllResponseHeaders();
-        if (headers) {
-          emitFindings(headers, this._url, tabId, "response-header");
-        }
-      });
-      super.send(body);
-    }
-  };
-}
-function emitFindings(input, url, tabId, sourceType) {
-  if (!input || input.length < 8) return;
-  const MAX_INLINE_SCAN = 5e4;
-  const chunk = input.length > MAX_INLINE_SCAN ? input.slice(0, MAX_INLINE_SCAN) : input;
-  const rawFindings = scan(chunk, { url, tabId, sourceType });
-  if (rawFindings.length === 0) return;
-  Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
-    for (const finding of findings) {
-      chrome.runtime.sendMessage({ type: "FINDING_DETECTED", finding });
-    }
-  }).catch((err) => console.warn("[Sentinel] Finding emit error:", err));
-}
-class DomScanner {
-  constructor(tabId) {
-    __publicField(this, "tabId");
-    __publicField(this, "observer", null);
-    __publicField(this, "scannedUrls", /* @__PURE__ */ new Set());
-    this.tabId = tabId;
-  }
-  /** Scan the initial HTML and start watching for new scripts */
-  start() {
-    this.scanText(document.documentElement.outerHTML, "html-source", window.location.href);
-    this.observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of Array.from(mutation.addedNodes)) {
-          if (node instanceof HTMLScriptElement) {
-            this.handleScriptTag(node);
-          }
-          if (node instanceof Element) {
-            node.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
-          }
-        }
-      }
-    });
-    this.observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true
-    });
-    document.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
-  }
-  stop() {
-    var _a;
-    (_a = this.observer) == null ? void 0 : _a.disconnect();
-    this.observer = null;
-  }
-  handleScriptTag(script) {
-    if (script.src) {
-      if (!this.scannedUrls.has(script.src)) {
-        this.scannedUrls.add(script.src);
-        this.fetchAndScanBundle(script.src);
-      }
-    } else if (script.textContent) {
-      this.scanText(script.textContent, "js-bundle", window.location.href);
-    }
-  }
-  async fetchAndScanBundle(url) {
-    try {
-      if (url.startsWith("chrome-extension://") || url.startsWith("data:")) return;
-      const response = await fetch(url, { credentials: "omit" });
-      if (!response.ok) return;
-      const text = await response.text();
-      this.scanInChunks(text, "js-bundle", url);
-    } catch {
-    }
-  }
-  /**
-   * Scans large text in chunks, yielding between each to avoid
-   * blocking the main thread on large bundles (2-5MB+).
-   */
-  scanInChunks(text, sourceType, url, chunkSize = 5e4) {
-    let offset = 0;
-    const processChunk = () => {
-      const chunk = text.slice(offset, offset + chunkSize);
-      if (chunk.length === 0) return;
-      this.scanText(chunk, sourceType, url);
-      offset += chunkSize;
-      if (offset < text.length) {
-        requestIdleCallback ? requestIdleCallback(processChunk, { timeout: 2e3 }) : setTimeout(processChunk, 0);
-      }
-    };
-    processChunk();
-  }
-  scanText(input, sourceType, url) {
-    const rawFindings = scan(input, { url, tabId: this.tabId, sourceType });
-    if (rawFindings.length === 0) return;
-    Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
-      for (const finding of findings) {
-        chrome.runtime.sendMessage({ type: "FINDING_DETECTED", finding });
-      }
-    }).catch((err) => console.warn("[Sentinel] DOM scan error:", err));
-  }
-}
 const TOAST_ID_PREFIX = "sentinel-toast-";
 const STYLE_ID = "sentinel-toast-styles";
 const MAX_TOASTS = 3;
@@ -632,6 +490,159 @@ function dismissToast(el) {
 }
 function escHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function interceptFetch(tabId) {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function(input, init2) {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (init2 == null ? void 0 : init2.headers) {
+      emitFindings(JSON.stringify(init2.headers), url, tabId, "request-header");
+    }
+    if ((init2 == null ? void 0 : init2.body) && typeof init2.body === "string") {
+      emitFindings(init2.body, url, tabId, "request-body");
+    }
+    const response = await originalFetch(input, init2);
+    const clone = response.clone();
+    clone.text().then((body) => {
+      emitFindings(body, url, tabId, "response-body");
+      const headerStr = JSON.stringify(Object.fromEntries(response.headers));
+      emitFindings(headerStr, url, tabId, "response-header");
+    }).catch(() => {
+    });
+    return response;
+  };
+}
+function interceptXHR(tabId) {
+  const OriginalXHR = window.XMLHttpRequest;
+  window.XMLHttpRequest = class extends OriginalXHR {
+    constructor() {
+      super(...arguments);
+      __publicField(this, "_url", "");
+    }
+    open(method, url, async, user, password) {
+      this._url = url.toString();
+      super.open(method, url.toString(), async ?? true, user, password);
+    }
+    send(body) {
+      if (body && typeof body === "string") {
+        emitFindings(body, this._url, tabId, "request-body");
+      }
+      this.addEventListener("load", () => {
+        if (typeof this.responseText === "string") {
+          emitFindings(this.responseText, this._url, tabId, "response-body");
+        }
+        const headers = this.getAllResponseHeaders();
+        if (headers) emitFindings(headers, this._url, tabId, "response-header");
+      });
+      super.send(body);
+    }
+  };
+}
+const shownPatterns$1 = /* @__PURE__ */ new Set();
+function emitFindings(input, url, tabId, sourceType) {
+  if (!input || input.length < 8) return;
+  const MAX_INLINE = 5e4;
+  const chunk = input.length > MAX_INLINE ? input.slice(0, MAX_INLINE) : input;
+  const rawFindings = scan(chunk, { url, tabId, sourceType });
+  if (rawFindings.length === 0) return;
+  Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
+    for (const finding of findings) {
+      chrome.runtime.sendMessage(
+        { type: "FINDING_DETECTED", finding },
+        (response) => {
+          if ((response == null ? void 0 : response.stored) && !shownPatterns$1.has(finding.patternId)) {
+            shownPatterns$1.add(finding.patternId);
+            showFindingToast(finding);
+          }
+        }
+      );
+    }
+  }).catch((err) => console.warn("[Sentinel] emit error:", err));
+}
+class DomScanner {
+  constructor(tabId) {
+    __publicField(this, "tabId");
+    __publicField(this, "observer", null);
+    __publicField(this, "scannedUrls", /* @__PURE__ */ new Set());
+    __publicField(this, "shownPatterns", /* @__PURE__ */ new Set());
+    this.tabId = tabId;
+  }
+  start() {
+    this.scanText(document.documentElement.outerHTML, "html-source", window.location.href);
+    this.observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of Array.from(mutation.addedNodes)) {
+          if (node instanceof HTMLScriptElement) {
+            this.handleScriptTag(node);
+          }
+          if (node instanceof Element) {
+            node.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
+          }
+        }
+      }
+    });
+    this.observer.observe(document.documentElement, { childList: true, subtree: true });
+    document.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
+  }
+  stop() {
+    var _a;
+    (_a = this.observer) == null ? void 0 : _a.disconnect();
+    this.observer = null;
+  }
+  handleScriptTag(script) {
+    if (script.src) {
+      if (!this.scannedUrls.has(script.src)) {
+        this.scannedUrls.add(script.src);
+        this.fetchAndScanBundle(script.src);
+      }
+    } else if (script.textContent) {
+      this.scanText(script.textContent, "js-bundle", window.location.href);
+    }
+  }
+  async fetchAndScanBundle(url) {
+    try {
+      if (url.startsWith("chrome-extension://") || url.startsWith("data:")) return;
+      const response = await fetch(url, { credentials: "omit" });
+      if (!response.ok) return;
+      const text = await response.text();
+      this.scanInChunks(text, "js-bundle", url);
+    } catch {
+    }
+  }
+  scanInChunks(text, sourceType, url, chunkSize = 5e4) {
+    let offset = 0;
+    const processChunk = () => {
+      const chunk = text.slice(offset, offset + chunkSize);
+      if (!chunk.length) return;
+      this.scanText(chunk, sourceType, url);
+      offset += chunkSize;
+      if (offset < text.length) {
+        if (typeof requestIdleCallback !== "undefined") {
+          requestIdleCallback(processChunk, { timeout: 2e3 });
+        } else {
+          setTimeout(processChunk, 0);
+        }
+      }
+    };
+    processChunk();
+  }
+  scanText(input, sourceType, url) {
+    const rawFindings = scan(input, { url, tabId: this.tabId, sourceType });
+    if (!rawFindings.length) return;
+    Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
+      for (const finding of findings) {
+        chrome.runtime.sendMessage(
+          { type: "FINDING_DETECTED", finding },
+          (response) => {
+            if ((response == null ? void 0 : response.stored) && !this.shownPatterns.has(finding.patternId)) {
+              this.shownPatterns.add(finding.patternId);
+              showFindingToast(finding);
+            }
+          }
+        );
+      }
+    }).catch((err) => console.warn("[Sentinel] scan error:", err));
+  }
 }
 async function init() {
   const tabId = await getTabId();

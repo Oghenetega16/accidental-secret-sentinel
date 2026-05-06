@@ -1,20 +1,14 @@
 import type { SourceType } from '../shared/types';
 import { scan } from '../engine/scanner';
+import { showFindingToast } from './toast';
 
 /**
  * Monkey-patches window.fetch and XMLHttpRequest to intercept
  * request/response data for scanning.
  *
- * IMPORTANT: This file runs in the MAIN world (page context), not the
- * extension's isolated world. It has full access to page APIs but must
- * use chrome.runtime.sendMessage to communicate findings.
- *
- * Critical pattern: always clone() response bodies before reading —
- * returning a consumed response breaks the page.
+ * Runs in MAIN world. Uses the sendMessage response callback to
+ * trigger toasts — chrome.tabs.sendMessage does NOT reach MAIN world.
  */
-
-const CURRENT_URL = () => window.location.href;
-const CURRENT_TAB_ID = -1; // populated by content.ts after tab ID negotiation
 
 // ─── fetch interception ───────────────────────────────────────────────────────
 
@@ -22,44 +16,32 @@ export function interceptFetch(tabId: number): void {
   const originalFetch = window.fetch.bind(window);
 
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    // Scan outgoing request
     const url = typeof input === 'string'
       ? input
       : input instanceof URL
         ? input.href
         : (input as Request).url;
 
-    // Scan request headers
     if (init?.headers) {
-      const headerStr = JSON.stringify(init.headers);
-      emitFindings(headerStr, url, tabId, 'request-header');
+      emitFindings(JSON.stringify(init.headers), url, tabId, 'request-header');
     }
-
-    // Scan request body
     if (init?.body && typeof init.body === 'string') {
       emitFindings(init.body, url, tabId, 'request-body');
     }
 
-    // Execute the real fetch
     const response = await originalFetch(input, init);
-
-    // Clone BEFORE reading — original is returned to the page untouched
     const clone = response.clone();
 
     clone.text()
       .then(body => {
         emitFindings(body, url, tabId, 'response-body');
-
-        // Also scan response headers
-        // Headers.entries() is not in all TS DOM lib versions — cast to any to iterate
+        // Headers.entries() cast — not in all TS DOM lib versions
         const headerStr = JSON.stringify(Object.fromEntries((response.headers as any)));
         emitFindings(headerStr, url, tabId, 'response-header');
       })
-      .catch(() => {
-        // Non-text body (images, binary) — skip silently
-      });
+      .catch(() => {});
 
-    return response; // Always return the ORIGINAL, not the clone
+    return response;
   };
 }
 
@@ -80,18 +62,13 @@ export function interceptXHR(tabId: number): void {
       if (body && typeof body === 'string') {
         emitFindings(body, this._url, tabId, 'request-body');
       }
-
       this.addEventListener('load', () => {
         if (typeof this.responseText === 'string') {
           emitFindings(this.responseText, this._url, tabId, 'response-body');
         }
-        // Scan response headers
         const headers = this.getAllResponseHeaders();
-        if (headers) {
-          emitFindings(headers, this._url, tabId, 'response-header');
-        }
+        if (headers) emitFindings(headers, this._url, tabId, 'response-header');
       });
-
       super.send(body);
     }
   } as typeof XMLHttpRequest;
@@ -99,10 +76,8 @@ export function interceptXHR(tabId: number): void {
 
 // ─── Finding emitter ──────────────────────────────────────────────────────────
 
-/**
- * Scans input and sends any findings to the service worker via IPC.
- * Runs async but does not block the calling code.
- */
+const shownPatterns = new Set<string>();
+
 function emitFindings(
   input: string,
   url: string,
@@ -111,12 +86,8 @@ function emitFindings(
 ): void {
   if (!input || input.length < 8) return;
 
-  // Cap input length to avoid scanning huge blobs synchronously on main thread
-  // Bundle scanning happens in content.ts via a Worker
-  const MAX_INLINE_SCAN = 50_000; // 50KB
-  const chunk = input.length > MAX_INLINE_SCAN
-    ? input.slice(0, MAX_INLINE_SCAN)
-    : input;
+  const MAX_INLINE = 50_000;
+  const chunk = input.length > MAX_INLINE ? input.slice(0, MAX_INLINE) : input;
 
   const rawFindings = scan(chunk, { url, tabId, sourceType });
   if (rawFindings.length === 0) return;
@@ -124,8 +95,18 @@ function emitFindings(
   Promise.all(rawFindings.map(r => r.toFinding()))
     .then(findings => {
       for (const finding of findings) {
-        chrome.runtime.sendMessage({ type: 'FINDING_DETECTED', finding });
+        chrome.runtime.sendMessage(
+          { type: 'FINDING_DETECTED', finding },
+          (response) => {
+            // response.stored === true means the service worker accepted it
+            // (not suppressed, not duplicate). Show toast here in MAIN world.
+            if (response?.stored && !shownPatterns.has(finding.patternId)) {
+              shownPatterns.add(finding.patternId);
+              showFindingToast(finding);
+            }
+          }
+        );
       }
     })
-    .catch(err => console.warn('[Sentinel] Finding emit error:', err));
+    .catch(err => console.warn('[Sentinel] emit error:', err));
 }

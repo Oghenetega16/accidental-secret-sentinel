@@ -18,7 +18,7 @@ import { isSuppressed } from '../shared/allowlist';
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Sentinel] Extension installed / updated.');
   const settings = await getSettings();
-  await updateSettings(settings); // write defaults if keys were missing
+  await updateSettings(settings);
 });
 
 // ─── Message handler ──────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ chrome.runtime.onMessage.addListener(
       console.error('[Sentinel] Message handler error:', err);
       sendResponse(null);
     });
-    return true; // keep channel open for async response
+    return true;
   }
 );
 
@@ -40,34 +40,29 @@ async function handleMessage(
   switch (message.type) {
 
     case 'GET_TAB_ID': {
-      return { type: 'GET_TAB_ID_RESPONSE', tabId: sender.tab?.id ?? -1 };
+      return { tabId: sender.tab?.id ?? -1 };
     }
 
     case 'FINDING_DETECTED': {
       const finding: Finding = message.finding;
       const settings = await getSettings();
 
-      if (!settings.enabled) return null;
-      if (isSuppressed(finding, settings)) return null;
+      if (!settings.enabled) return { stored: false };
+      if (isSuppressed(finding, settings)) return { stored: false };
 
       await addFinding(finding);
       await updateBadge(finding.tabId);
 
-      // Broadcast to popup (if open)
+      // Notify popup if open
       chrome.runtime.sendMessage({
         type: 'FINDING_DETECTED',
         finding,
       }).catch(() => {});
 
-      // Broadcast back to the tab so the content script can show a toast
-      if (finding.tabId > 0) {
-        chrome.tabs.sendMessage(finding.tabId, {
-          type: 'FINDING_DETECTED',
-          finding,
-        }).catch(() => {});
-      }
-
-      return null;
+      // Return stored:true + finding so the content script's sendMessage
+      // callback can trigger the toast directly in MAIN world.
+      // chrome.tabs.sendMessage does NOT reach MAIN world content scripts.
+      return { stored: true, finding };
     }
 
     case 'GET_FINDINGS': {
@@ -80,22 +75,11 @@ async function handleMessage(
       const result = await addSuppression(sup);
 
       if (result.added) {
-        // Purge any already-stored findings that match this suppression
         await purgeSuppressedFindings(sup);
-
-        // Notify popup of updated badge counts
-        const settings = await getSettings();
-        const lastSuppression = settings.suppressions.at(-1);
-
-        if (lastSuppression) {
-          // Re-broadcast updated findings to popup
-          chrome.runtime.sendMessage({
-            type: 'SUPPRESSION_ADDED',
-            suppression: lastSuppression,
-          } as any).catch(() => {});
-        }
-
-        // Refresh badge for all windows
+        chrome.runtime.sendMessage({
+          type: 'SUPPRESSION_ADDED',
+          suppression: sup,
+        } as any).catch(() => {});
         const tabs = await chrome.tabs.query({});
         for (const tab of tabs) {
           if (tab.id) await updateBadge(tab.id);
