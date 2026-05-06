@@ -85,7 +85,9 @@ export type MessageType =
   | 'GET_SETTINGS_RESPONSE'
   | 'UPDATE_SETTINGS'
   | 'GET_TAB_ID'
-  | 'GET_TAB_ID_RESPONSE';
+  | 'GET_TAB_ID_RESPONSE'
+  | 'REMOVE_SUPPRESSION'
+  | 'SUPPRESSION_ADDED';
 
 export interface BaseMessage {
   type: MessageType;
@@ -139,6 +141,16 @@ export interface GetTabIdResponseMessage extends BaseMessage {
   tabId: number;
 }
 
+export interface RemoveSuppressionMessage extends BaseMessage {
+  type: 'REMOVE_SUPPRESSION';
+  suppressionId: string;
+}
+
+export interface SuppressionAddedMessage extends BaseMessage {
+  type: 'SUPPRESSION_ADDED';
+  suppression: Suppression;
+}
+
 export type Message =
   | FindingDetectedMessage
   | GetFindingsMessage
@@ -149,4 +161,6 @@ export type Message =
   | GetSettingsResponseMessage
   | UpdateSettingsMessage
   | GetTabIdMessage
-  | GetTabIdResponseMessage;
+  | GetTabIdResponseMessage
+  | RemoveSuppressionMessage
+  | SuppressionAddedMessage;
