@@ -5,31 +5,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Secret Sentinel DevTools</title>
-    <script>
-        // This page is the devtools_page entry point.
-        // It runs in the DevTools context and is responsible for
-        // registering our custom panel inside Chrome DevTools.
-        chrome.devtools.panels.create(
-            'Sentinel',           // Panel tab title
-            'icons/icon16.png',   // Panel icon
-            'panel.html',         // Panel body — the real UI
-            function (panel) {
-                // panel.onShown fires when the user switches to our tab
-                panel.onShown.addListener(function (panelWindow) {
-                    // Notify panel.ts that it is now visible so it can refresh findings
-                    if (panelWindow.__sentinelOnShown) {
-                        panelWindow.__sentinelOnShown();
-                    }
-                });
-
-                panel.onHidden.addListener(function () {
-                    // Nothing to clean up for now — placeholder for future use
-                });
-            }
-        );
-    </script>
 </head>
 
-<body></body>
+<body>
+    <!-- No inline scripts — MV3 CSP forbids them in extension pages -->
+    <script src="dist/devtools-init.js"></script>
+</body>
 
 </html>

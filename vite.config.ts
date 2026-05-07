@@ -20,6 +20,7 @@ export default defineConfig({
         panel:      resolve(__dirname, 'src/devtools/panel.ts'),
         options:    resolve(__dirname, 'src/options/options.ts'),
         relay:      resolve(__dirname, 'src/content/relay.ts'),
+        'devtools-init': resolve(__dirname, 'src/devtools/devtools-init.ts'),
       },
       output: {
         entryFileNames: '[name].js',

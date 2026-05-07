@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secret Sentinel — Settings</title>
+    <link rel="stylesheet" href="src/popup/popup.css" />
+    <style>
+        body {
+            width: 100%;
+            min-height: 100vh;
+            max-height: none;
+            background: #f8f8f7;
+            padding: 28px 24px;
+            font-size: 13px;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 28px;
+        }
+
+        .page-logo {
+            width: 28px;
+            height: 28px;
+            background: #E24B4A;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .page-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a1a18;
+        }
+
+        .page-subtitle {
+            font-size: 12px;
+            color: #888880;
+            margin-top: 1px;
+        }
+
+        .content {
+            max-width: 640px;
+        }
+
+        .section {
+            background: #fff;
+            border: 1px solid #e8e6e0;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: #888880;
+            padding: 10px 16px 8px;
+            border-bottom: 1px solid #f0ede8;
+            background: #f8f8f7;
+        }
+
+        /* Toggle row */
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0ede8;
+            gap: 16px;
+        }
+
+        .setting-row:last-child {
+            border-bottom: none;
+        }
+
+        .setting-info {
+            flex: 1;
+        }
+
+        .setting-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #1a1a18;
+        }
+
+        .setting-desc {
+            font-size: 11px;
+            color: #888880;
+            margin-top: 2px;
+            line-height: 1.5;
+        }
+
+        /* Suppression list */
+        .suppression-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            border-bottom: 1px solid #f0ede8;
+            gap: 12px;
+        }
+
+        .suppression-item:last-child {
+            border-bottom: none;
+        }
+
+        .suppression-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .suppression-label {
+            font-size: 12px;
+            color: #1a1a18;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .suppression-meta {
+            font-size: 11px;
+            color: #888880;
+            margin-top: 2px;
+        }
+
+        .kind-chip {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: #f1efe8;
+            color: #555550;
+            flex-shrink: 0;
+        }
+
+        .btn-remove {
+            font-size: 11px;
+            color: #791F1F;
+            background: none;
+            border: 1px solid #f0c4c4;
+            border-radius: 4px;
+            padding: 3px 10px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background .12s;
+        }
+
+        .btn-remove:hover {
+            background: #FCEBEB;
+        }
+
+        .empty-suppressions {
+            padding: 20px 16px;
+            text-align: center;
+            font-size: 12px;
+            color: #888880;
+        }
+
+        /* Domain list */
+        .domain-row {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0ede8;
+            align-items: center;
+        }
+
+        .domain-input {
+            flex: 1;
+            font-size: 12px;
+            padding: 5px 10px;
+            border: 1px solid #e8e6e0;
+            border-radius: 4px;
+            outline: none;
+            font-family: 'SF Mono', Consolas, monospace;
+        }
+
+        .domain-input:focus {
+            border-color: #185FA5;
+        }
+
+        .btn-add {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 5px 14px;
+            background: #185FA5;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: opacity .12s;
+        }
+
+        .btn-add:hover {
+            opacity: .85;
+        }
+
+        .domain-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            border-bottom: 1px solid #f0ede8;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 12px;
+        }
+
+        .domain-item:last-child {
+            border-bottom: none;
+        }
+
+        /* Export / import row */
+        .action-row {
+            padding: 12px 16px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-action {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 14px;
+            border: 1px solid #e8e6e0;
+            border-radius: 4px;
+            background: #fff;
+            color: #333;
+            cursor: pointer;
+            transition: background .12s;
+        }
+
+        .btn-action:hover {
+            background: #f1efe8;
+        }
+
+        .saved-flash {
+            font-size: 11px;
+            color: #27500A;
+            background: #EAF3DE;
+            padding: 3px 10px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity .2s;
+        }
+
+        .saved-flash.visible {
+            opacity: 1;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-header">
+        <img src="icons/icon32.png" width="28" height="28" style="border-radius:6px;flex-shrink:0" alt=""
+            aria-hidden="true" />
+        <div>
+            <div class="page-title">Secret Sentinel</div>
+            <div class="page-subtitle">Settings & suppression management</div>
+        </div>
+    </div>
+
+    <div class="content">
+
+        <!-- Global settings -->
+        <div class="section">
+            <div class="section-title">General</div>
+
+            <div class="setting-row">
+                <div class="setting-info">
+                    <div class="setting-label">Enable scanning</div>
+                    <div class="setting-desc">Turn off to pause all scanning globally without uninstalling.</div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="toggle-enabled" checked
+                        aria-label="Enable or disable scanning globally" />
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Active suppressions -->
+        <div class="section">
+            <div class="section-title">Active suppressions</div>
+            <div id="suppressions-list">
+                <div class="empty-suppressions">No suppressions yet. Suppress findings from the popup or DevTools panel.
+                </div>
+            </div>
+        </div>
+
+        <!-- Disabled domains -->
+        <div class="section">
+            <div class="section-title">Disabled domains</div>
+            <div class="domain-row">
+                <label for="domain-input" class="sr-only">Domain to disable scanning on</label>
+                <input class="domain-input" id="domain-input" type="text" placeholder="e.g. localhost, example.com"
+                    aria-label="Enter a domain to disable scanning on" />
+                <button class="btn-add" id="btn-add-domain">Add</button>
+            </div>
+            <div id="domains-list"></div>
+        </div>
+
+        <!-- Export / Import -->
+        <div class="section">
+            <div class="section-title">Backup & restore</div>
+            <div class="action-row">
+                <button class="btn-action" id="btn-export">Export settings JSON</button>
+                <label class="btn-action" style="cursor:pointer">
+                    Import settings JSON
+                    <input type="file" id="file-import" accept=".json" style="display:none"
+                        aria-label="Import settings from JSON file" />
+                </label>
+                <span class="saved-flash" id="saved-flash">Saved ✓</span>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="dist/options.js"></script>
+</body>
+
+</html>
