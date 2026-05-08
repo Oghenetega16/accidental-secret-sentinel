@@ -1,13 +1,14 @@
 /**
- * content.ts — MAIN world entry point.
+ * content.ts — MAIN world.
  *
- * Communication architecture:
- *   MAIN world → service worker : chrome.runtime.sendMessage (works fine)
- *   service worker → MAIN world : chrome.tabs.sendMessage → relay.ts (ISOLATED)
- *                                 → window.postMessage → this file
+ * chrome.runtime is NOT available here (this is the page's JS context).
+ * All extension API calls go through relay.ts (ISOLATED world) via postMessage.
  *
- * chrome.tabs.sendMessage cannot reach MAIN world directly — the relay
- * script bridges the gap.
+ * Protocol:
+ *   MAIN → ISOLATED: window.postMessage({ __sentinel_to_bg__: true, message })
+ *   ISOLATED → MAIN: window.postMessage({ __sentinel_to_page__: true, finding })
+ *   MAIN asks for settings: window.postMessage({ __sentinel_get_settings__: true })
+ *   ISOLATED replies:       window.postMessage({ __sentinel_settings__: true, settings })
  */
 
 import { interceptFetch, interceptXHR } from './fetch-intercept';
@@ -15,52 +16,72 @@ import { DomScanner } from './dom-scanner';
 import { showFindingToast } from './toast';
 import type { Finding } from '../shared/types';
 
-const SENTINEL_MSG_KEY = '__sentinel_finding__';
-
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+const TO_PAGE = '__sentinel_to_page__';
 
 async function init(): Promise<void> {
-  const tabId = await getTabId();
-  if (tabId === null || tabId === -1) return;
+  console.log('[Sentinel] MAIN world init, readyState:', document.readyState);
 
-  const settings = await getSettings();
+  // Ask coordinator (ISOLATED world) for settings
+  const settings = await requestSettings();
+  console.log('[Sentinel] settings received — enabled:', settings.enabled);
+
   if (!settings.enabled) return;
 
   const hostname = window.location.hostname;
-  const isDomainDisabled = settings.disabledDomains.some(
+  const blocked = settings.disabledDomains.some(
     (d: string) => hostname === d || hostname.endsWith('.' + d)
   );
-  if (isDomainDisabled) return;
+  if (blocked) { console.log('[Sentinel] domain disabled:', hostname); return; }
 
-  // Patch fetch + XHR before any page script runs
-  interceptFetch(tabId);
-  interceptXHR(tabId);
+  // Patch fetch + XHR (must happen before page JS runs — document_start)
+  interceptFetch();
+  interceptXHR();
+  console.log('[Sentinel] fetch/XHR patched');
 
-  // DOM scan after DOM is ready
+  // DOM scanner after DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => startDomScanner(tabId), { once: true });
+    document.addEventListener('DOMContentLoaded', startDomScanner, { once: true });
   } else {
-    startDomScanner(tabId);
+    startDomScanner();
   }
 
-  // Listen for findings forwarded by relay.ts via window.postMessage
-  // This is the only reliable way to receive messages in MAIN world.
+  // Toast trigger — coordinator posts findings back here after service worker confirms
   window.addEventListener('message', (event) => {
-    if (
-      event.source === window &&
-      event.data?.[SENTINEL_MSG_KEY] === true
-    ) {
+    if (event.source === window && event.data?.[TO_PAGE] === true) {
+      console.log('[Sentinel] toast trigger received for:', event.data.finding?.patternId);
       handleFinding(event.data.finding as Finding);
     }
   });
+
+  console.log('[Sentinel] init complete');
 }
 
-// ─── DOM scanner lifecycle ────────────────────────────────────────────────────
+// ─── Settings request ─────────────────────────────────────────────────────────
+
+function requestSettings(): Promise<{ enabled: boolean; disabledDomains: string[] }> {
+  return new Promise(resolve => {
+    const fallback = { enabled: true, disabledDomains: [] };
+    const timeout = setTimeout(() => resolve(fallback), 1000);
+
+    window.addEventListener('message', function handler(event) {
+      if (event.source === window && event.data?.__sentinel_settings__ === true) {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handler);
+        resolve(event.data.settings ?? fallback);
+      }
+    });
+
+    window.postMessage({ __sentinel_get_settings__: true }, '*');
+  });
+}
+
+// ─── DOM scanner ──────────────────────────────────────────────────────────────
 
 let domScanner: InstanceType<typeof DomScanner> | null = null;
 
-function startDomScanner(tabId: number): void {
-  domScanner = new DomScanner(tabId);
+function startDomScanner(): void {
+  console.log('[Sentinel] starting DOM scanner');
+  domScanner = new DomScanner();
   domScanner.start();
   window.addEventListener('beforeunload', () => {
     domScanner?.stop();
@@ -68,10 +89,8 @@ function startDomScanner(tabId: number): void {
   }, { once: true });
 }
 
-// ─── Finding handler ──────────────────────────────────────────────────────────
+// ─── Toast handler ────────────────────────────────────────────────────────────
 
-// One toast per pattern per page load — relay may fire multiple times
-// for the same pattern if the popup is also open.
 const shownPatterns = new Set<string>();
 
 function handleFinding(finding: Finding): void {
@@ -79,31 +98,6 @@ function handleFinding(finding: Finding): void {
     shownPatterns.add(finding.patternId);
     showFindingToast(finding);
   }
-}
-
-// ─── IPC helpers ─────────────────────────────────────────────────────────────
-
-async function getTabId(): Promise<number | null> {
-  return new Promise(resolve => {
-    try {
-      chrome.runtime.sendMessage({ type: 'GET_TAB_ID' }, response => {
-        if (chrome.runtime.lastError || !response) { resolve(null); return; }
-        resolve((response as { tabId: number }).tabId ?? null);
-      });
-    } catch { resolve(null); }
-  });
-}
-
-async function getSettings(): Promise<{ enabled: boolean; disabledDomains: string[] }> {
-  return new Promise(resolve => {
-    const fallback = { enabled: true, disabledDomains: [] };
-    try {
-      chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, response => {
-        if (chrome.runtime.lastError || !response) { resolve(fallback); return; }
-        resolve((response as { settings: typeof fallback }).settings ?? fallback);
-      });
-    } catch { resolve(fallback); }
-  });
 }
 
 init().catch(err => console.warn('[Sentinel] init error:', err));

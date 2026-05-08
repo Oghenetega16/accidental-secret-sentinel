@@ -129,13 +129,16 @@ chrome.runtime.onMessage.addListener(
   }
 );
 async function handleMessage(message, sender) {
-  var _a;
+  var _a, _b;
   switch (message.type) {
     case "GET_TAB_ID": {
       return { tabId: ((_a = sender.tab) == null ? void 0 : _a.id) ?? -1 };
     }
     case "FINDING_DETECTED": {
-      const finding = message.finding;
+      const finding = {
+        ...message.finding,
+        tabId: ((_b = sender.tab) == null ? void 0 : _b.id) ?? message.finding.tabId
+      };
       const settings = await getSettings();
       if (!settings.enabled) return { stored: false };
       if (isSuppressed(finding, settings)) return { stored: false };
@@ -198,15 +201,18 @@ async function handleMessage(message, sender) {
   }
 }
 async function updateBadge(tabId) {
-  const count = await getFindingCount(tabId);
-  if (count === 0) {
-    await chrome.action.setBadgeText({ text: "", tabId });
-  } else {
-    await chrome.action.setBadgeText({
-      text: count > 99 ? "99+" : String(count),
-      tabId
-    });
-    await chrome.action.setBadgeBackgroundColor({ color: "#E24B4A", tabId });
+  try {
+    const count = await getFindingCount(tabId);
+    if (count === 0) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+    } else {
+      await chrome.action.setBadgeText({
+        text: count > 99 ? "99+" : String(count),
+        tabId
+      });
+      await chrome.action.setBadgeBackgroundColor({ color: "#E24B4A", tabId });
+    }
+  } catch {
   }
 }
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {

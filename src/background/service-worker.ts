@@ -44,7 +44,12 @@ async function handleMessage(
     }
 
     case 'FINDING_DETECTED': {
-      const finding: Finding = message.finding;
+      // Use sender.tab.id as the authoritative tabId — more reliable than
+      // the value embedded in the finding (which can be -1 on file:// pages).
+      const finding: Finding = {
+        ...message.finding,
+        tabId: sender.tab?.id ?? message.finding.tabId,
+      };
       const settings = await getSettings();
 
       if (!settings.enabled) return { stored: false };
@@ -124,15 +129,19 @@ async function handleMessage(
 // ─── Badge management ─────────────────────────────────────────────────────────
 
 async function updateBadge(tabId: number): Promise<void> {
-  const count = await getFindingCount(tabId);
-  if (count === 0) {
-    await chrome.action.setBadgeText({ text: '', tabId });
-  } else {
-    await chrome.action.setBadgeText({
-      text: count > 99 ? '99+' : String(count),
-      tabId,
-    });
-    await chrome.action.setBadgeBackgroundColor({ color: '#E24B4A', tabId });
+  try {
+    const count = await getFindingCount(tabId);
+    if (count === 0) {
+      await chrome.action.setBadgeText({ text: '', tabId });
+    } else {
+      await chrome.action.setBadgeText({
+        text: count > 99 ? '99+' : String(count),
+        tabId,
+      });
+      await chrome.action.setBadgeBackgroundColor({ color: '#E24B4A', tabId });
+    }
+  } catch {
+    // Tab was closed or navigated before the badge update completed — ignore
   }
 }
 

@@ -1,19 +1,17 @@
+/**
+ * dom-scanner.ts — MAIN world.
+ * Posts findings via window.postMessage — no chrome.runtime.
+ */
+
 import { scan } from '../engine/scanner';
 import type { SourceType } from '../shared/types';
 
-/**
- * Scans HTML source and dynamically injected <script> tags.
- * Sends findings to service worker only — toast is handled by the
- * relay → postMessage → content.ts pipeline.
- */
+const TO_BG      = '__sentinel_to_bg__';
+const UNKNOWN_TAB = -1;
+
 export class DomScanner {
-  private tabId: number;
   private observer: MutationObserver | null = null;
   private scannedUrls = new Set<string>();
-
-  constructor(tabId: number) {
-    this.tabId = tabId;
-  }
 
   start(): void {
     this.scanText(document.documentElement.outerHTML, 'html-source', window.location.href);
@@ -22,13 +20,10 @@ export class DomScanner {
       for (const mutation of mutations) {
         for (const node of Array.from(mutation.addedNodes)) {
           if (node instanceof HTMLScriptElement) this.handleScriptTag(node);
-          if (node instanceof Element) {
-            node.querySelectorAll('script').forEach(s => this.handleScriptTag(s));
-          }
+          if (node instanceof Element) node.querySelectorAll('script').forEach(s => this.handleScriptTag(s));
         }
       }
     });
-
     this.observer.observe(document.documentElement, { childList: true, subtree: true });
     document.querySelectorAll('script').forEach(s => this.handleScriptTag(s));
   }
@@ -56,7 +51,7 @@ export class DomScanner {
       if (!response.ok) return;
       const text = await response.text();
       this.scanInChunks(text, 'js-bundle', url);
-    } catch { /* network errors expected — skip */ }
+    } catch { /* network errors expected */ }
   }
 
   private scanInChunks(text: string, sourceType: SourceType, url: string, chunkSize = 50_000): void {
@@ -67,26 +62,27 @@ export class DomScanner {
       this.scanText(chunk, sourceType, url);
       offset += chunkSize;
       if (offset < text.length) {
-        if (typeof requestIdleCallback !== 'undefined') {
-          requestIdleCallback(processChunk, { timeout: 2000 });
-        } else {
-          setTimeout(processChunk, 0);
-        }
+        typeof requestIdleCallback !== 'undefined'
+          ? requestIdleCallback(processChunk, { timeout: 2000 })
+          : setTimeout(processChunk, 0);
       }
     };
     processChunk();
   }
 
   private scanText(input: string, sourceType: SourceType, url: string): void {
-    const rawFindings = scan(input, { url, tabId: this.tabId, sourceType });
+    const rawFindings = scan(input, { url, tabId: UNKNOWN_TAB, sourceType });
     if (!rawFindings.length) return;
 
-    Promise.all(rawFindings.map(r => r.toFinding()))
-      .then(findings => {
-        for (const finding of findings) {
-          chrome.runtime.sendMessage({ type: 'FINDING_DETECTED', finding });
-        }
-      })
-      .catch(err => console.warn('[Sentinel] scan error:', err));
+    console.log(`[Sentinel] found ${rawFindings.length} finding(s) in ${sourceType}`);
+
+    Promise.all(rawFindings.map(r => r.toFinding())).then(findings => {
+      for (const finding of findings) {
+        window.postMessage({
+          [TO_BG]: true,
+          message: { type: 'FINDING_DETECTED', finding },
+        }, '*');
+      }
+    }).catch(err => console.warn('[Sentinel] scan error:', err));
   }
 }

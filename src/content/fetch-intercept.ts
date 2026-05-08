@@ -1,45 +1,42 @@
-import type { SourceType } from '../shared/types';
-import { scan } from '../engine/scanner';
-
 /**
- * Monkey-patches window.fetch and XMLHttpRequest.
- * Runs in MAIN world — sends findings to the service worker only.
- * Toast display is handled by content.ts via the relay postMessage bridge.
+ * fetch-intercept.ts — MAIN world.
+ * No chrome.runtime calls. Posts findings via window.postMessage
+ * to the ISOLATED world coordinator (relay.ts).
  */
 
-export function interceptFetch(tabId: number): void {
+import { scan } from '../engine/scanner';
+import type { SourceType } from '../shared/types';
+
+const TO_BG = '__sentinel_to_bg__';
+
+// tabId is unknown in MAIN world — service worker overrides from sender.tab.id
+const UNKNOWN_TAB = -1;
+
+export function interceptFetch(): void {
   const originalFetch = window.fetch.bind(window);
 
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = typeof input === 'string'
       ? input
-      : input instanceof URL
-        ? input.href
-        : (input as Request).url;
+      : input instanceof URL ? input.href : (input as Request).url;
 
-    if (init?.headers) {
-      emitFindings(JSON.stringify(init.headers), url, tabId, 'request-header');
-    }
-    if (init?.body && typeof init.body === 'string') {
-      emitFindings(init.body, url, tabId, 'request-body');
-    }
+    if (init?.headers) emitFindings(JSON.stringify(init.headers), url, 'request-header');
+    if (init?.body && typeof init.body === 'string') emitFindings(init.body, url, 'request-body');
 
     const response = await originalFetch(input, init);
     const clone = response.clone();
 
-    clone.text()
-      .then(body => {
-        emitFindings(body, url, tabId, 'response-body');
-        const headerStr = JSON.stringify(Object.fromEntries((response.headers as any)));
-        emitFindings(headerStr, url, tabId, 'response-header');
-      })
-      .catch(() => {});
+    clone.text().then(body => {
+      emitFindings(body, url, 'response-body');
+      const headerStr = JSON.stringify(Object.fromEntries((response.headers as any)));
+      emitFindings(headerStr, url, 'response-header');
+    }).catch(() => {});
 
     return response;
   };
 }
 
-export function interceptXHR(tabId: number): void {
+export function interceptXHR(): void {
   const OriginalXHR = window.XMLHttpRequest;
 
   (window as typeof globalThis).XMLHttpRequest = class extends OriginalXHR {
@@ -51,39 +48,30 @@ export function interceptXHR(tabId: number): void {
     }
 
     override send(body?: Document | XMLHttpRequestBodyInit | null): void {
-      if (body && typeof body === 'string') {
-        emitFindings(body, this._url, tabId, 'request-body');
-      }
+      if (body && typeof body === 'string') emitFindings(body, this._url, 'request-body');
       this.addEventListener('load', () => {
-        if (typeof this.responseText === 'string') {
-          emitFindings(this.responseText, this._url, tabId, 'response-body');
-        }
-        const headers = this.getAllResponseHeaders();
-        if (headers) emitFindings(headers, this._url, tabId, 'response-header');
+        if (typeof this.responseText === 'string') emitFindings(this.responseText, this._url, 'response-body');
+        const h = this.getAllResponseHeaders();
+        if (h) emitFindings(h, this._url, 'response-header');
       });
       super.send(body);
     }
   } as typeof XMLHttpRequest;
 }
 
-// ─── Emitter — scan and send to service worker ────────────────────────────────
-
-function emitFindings(input: string, url: string, tabId: number, sourceType: SourceType): void {
+function emitFindings(input: string, url: string, sourceType: SourceType): void {
   if (!input || input.length < 8) return;
+  const chunk = input.length > 50_000 ? input.slice(0, 50_000) : input;
+  const rawFindings = scan(chunk, { url, tabId: UNKNOWN_TAB, sourceType });
+  if (!rawFindings.length) return;
 
-  const MAX_INLINE = 50_000;
-  const chunk = input.length > MAX_INLINE ? input.slice(0, MAX_INLINE) : input;
-  const rawFindings = scan(chunk, { url, tabId, sourceType });
-  if (rawFindings.length === 0) return;
-
-  Promise.all(rawFindings.map(r => r.toFinding()))
-    .then(findings => {
-      for (const finding of findings) {
-        // Send to service worker — it stores, updates badge, and relays
-        // back via chrome.tabs.sendMessage → relay.ts → window.postMessage
-        // → content.ts → showFindingToast
-        chrome.runtime.sendMessage({ type: 'FINDING_DETECTED', finding });
-      }
-    })
-    .catch(err => console.warn('[Sentinel] emit error:', err));
+  Promise.all(rawFindings.map(r => r.toFinding())).then(findings => {
+    for (const finding of findings) {
+      // Post to ISOLATED world coordinator via postMessage
+      window.postMessage({
+        [TO_BG]: true,
+        message: { type: 'FINDING_DETECTED', finding },
+      }, '*');
+    }
+  }).catch(err => console.warn('[Sentinel] emit error:', err));
 }
