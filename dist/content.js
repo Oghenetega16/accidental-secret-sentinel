@@ -366,28 +366,26 @@ function scan(input, opts) {
   }
   return results;
 }
-function interceptFetch(tabId) {
+const TO_BG$1 = "__sentinel_to_bg__";
+const UNKNOWN_TAB$1 = -1;
+function interceptFetch() {
   const originalFetch = window.fetch.bind(window);
   window.fetch = async function(input, init2) {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (init2 == null ? void 0 : init2.headers) {
-      emitFindings(JSON.stringify(init2.headers), url, tabId, "request-header");
-    }
-    if ((init2 == null ? void 0 : init2.body) && typeof init2.body === "string") {
-      emitFindings(init2.body, url, tabId, "request-body");
-    }
+    if (init2 == null ? void 0 : init2.headers) emitFindings(JSON.stringify(init2.headers), url, "request-header");
+    if ((init2 == null ? void 0 : init2.body) && typeof init2.body === "string") emitFindings(init2.body, url, "request-body");
     const response = await originalFetch(input, init2);
     const clone = response.clone();
     clone.text().then((body) => {
-      emitFindings(body, url, tabId, "response-body");
+      emitFindings(body, url, "response-body");
       const headerStr = JSON.stringify(Object.fromEntries(response.headers));
-      emitFindings(headerStr, url, tabId, "response-header");
+      emitFindings(headerStr, url, "response-header");
     }).catch(() => {
     });
     return response;
   };
 }
-function interceptXHR(tabId) {
+function interceptXHR() {
   const OriginalXHR = window.XMLHttpRequest;
   window.XMLHttpRequest = class extends OriginalXHR {
     constructor() {
@@ -399,49 +397,44 @@ function interceptXHR(tabId) {
       super.open(method, url.toString(), async ?? true, user, password);
     }
     send(body) {
-      if (body && typeof body === "string") {
-        emitFindings(body, this._url, tabId, "request-body");
-      }
+      if (body && typeof body === "string") emitFindings(body, this._url, "request-body");
       this.addEventListener("load", () => {
-        if (typeof this.responseText === "string") {
-          emitFindings(this.responseText, this._url, tabId, "response-body");
-        }
-        const headers = this.getAllResponseHeaders();
-        if (headers) emitFindings(headers, this._url, tabId, "response-header");
+        if (typeof this.responseText === "string") emitFindings(this.responseText, this._url, "response-body");
+        const h = this.getAllResponseHeaders();
+        if (h) emitFindings(h, this._url, "response-header");
       });
       super.send(body);
     }
   };
 }
-function emitFindings(input, url, tabId, sourceType) {
+function emitFindings(input, url, sourceType) {
   if (!input || input.length < 8) return;
-  const MAX_INLINE = 5e4;
-  const chunk = input.length > MAX_INLINE ? input.slice(0, MAX_INLINE) : input;
-  const rawFindings = scan(chunk, { url, tabId, sourceType });
-  if (rawFindings.length === 0) return;
+  const chunk = input.length > 5e4 ? input.slice(0, 5e4) : input;
+  const rawFindings = scan(chunk, { url, tabId: UNKNOWN_TAB$1, sourceType });
+  if (!rawFindings.length) return;
   Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
     for (const finding of findings) {
-      chrome.runtime.sendMessage(chrome.runtime.id, { type: "FINDING_DETECTED", finding });
+      window.postMessage({
+        [TO_BG$1]: true,
+        message: { type: "FINDING_DETECTED", finding }
+      }, "*");
     }
   }).catch((err) => console.warn("[Sentinel] emit error:", err));
 }
+const TO_BG = "__sentinel_to_bg__";
+const UNKNOWN_TAB = -1;
 class DomScanner {
-  constructor(tabId) {
-    __publicField(this, "tabId");
+  constructor() {
     __publicField(this, "observer", null);
     __publicField(this, "scannedUrls", /* @__PURE__ */ new Set());
-    this.tabId = tabId;
   }
   start() {
-    console.log("[Sentinel] DomScanner.start() — scanning HTML source");
     this.scanText(document.documentElement.outerHTML, "html-source", window.location.href);
     this.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of Array.from(mutation.addedNodes)) {
           if (node instanceof HTMLScriptElement) this.handleScriptTag(node);
-          if (node instanceof Element) {
-            node.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
-          }
+          if (node instanceof Element) node.querySelectorAll("script").forEach((s) => this.handleScriptTag(s));
         }
       }
     });
@@ -481,25 +474,21 @@ class DomScanner {
       this.scanText(chunk, sourceType, url);
       offset += chunkSize;
       if (offset < text.length) {
-        if (typeof requestIdleCallback !== "undefined") {
-          requestIdleCallback(processChunk, { timeout: 2e3 });
-        } else {
-          setTimeout(processChunk, 0);
-        }
+        typeof requestIdleCallback !== "undefined" ? requestIdleCallback(processChunk, { timeout: 2e3 }) : setTimeout(processChunk, 0);
       }
     };
     processChunk();
   }
   scanText(input, sourceType, url) {
-    const rawFindings = scan(input, { url, tabId: this.tabId, sourceType });
-    if (rawFindings.length > 0) {
-      console.log(`[Sentinel] scan found ${rawFindings.length} finding(s) in ${sourceType}`);
-    }
+    const rawFindings = scan(input, { url, tabId: UNKNOWN_TAB, sourceType });
     if (!rawFindings.length) return;
+    console.log(`[Sentinel] found ${rawFindings.length} finding(s) in ${sourceType}`);
     Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
       for (const finding of findings) {
-        console.log("[Sentinel] sending FINDING_DETECTED:", finding.patternId, "tabId:", finding.tabId);
-        chrome.runtime.sendMessage(chrome.runtime.id, { type: "FINDING_DETECTED", finding });
+        window.postMessage({
+          [TO_BG]: true,
+          message: { type: "FINDING_DETECTED", finding }
+        }, "*");
       }
     }).catch((err) => console.warn("[Sentinel] scan error:", err));
   }
@@ -596,50 +585,56 @@ function dismissToast() {
 function escHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-const SENTINEL_MSG_KEY = "__sentinel_finding__";
+const TO_PAGE = "__sentinel_to_page__";
 async function init() {
-  console.log("[Sentinel] content script running, readyState:", document.readyState);
-  const tabId = await getTabId();
-  console.log("[Sentinel] tabId from service worker:", tabId);
-  if (tabId === null) {
-    console.warn("[Sentinel] service worker unreachable — aborting");
-    return;
-  }
-  const settings = await getSettings();
-  console.log("[Sentinel] settings:", settings.enabled, "domains:", settings.disabledDomains);
-  if (!settings.enabled) {
-    console.log("[Sentinel] scanning disabled globally");
-    return;
-  }
+  console.log("[Sentinel] MAIN world init, readyState:", document.readyState);
+  const settings = await requestSettings();
+  console.log("[Sentinel] settings received — enabled:", settings.enabled);
+  if (!settings.enabled) return;
   const hostname = window.location.hostname;
-  const isDomainDisabled = settings.disabledDomains.some(
+  const blocked = settings.disabledDomains.some(
     (d) => hostname === d || hostname.endsWith("." + d)
   );
-  if (isDomainDisabled) {
+  if (blocked) {
     console.log("[Sentinel] domain disabled:", hostname);
     return;
   }
-  interceptFetch(tabId);
-  interceptXHR(tabId);
+  interceptFetch();
+  interceptXHR();
   console.log("[Sentinel] fetch/XHR patched");
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => startDomScanner(tabId), { once: true });
+    document.addEventListener("DOMContentLoaded", startDomScanner, { once: true });
   } else {
-    startDomScanner(tabId);
+    startDomScanner();
   }
   window.addEventListener("message", (event) => {
     var _a, _b;
-    if (event.source === window && ((_a = event.data) == null ? void 0 : _a[SENTINEL_MSG_KEY]) === true) {
-      console.log("[Sentinel] received finding via postMessage relay:", (_b = event.data.finding) == null ? void 0 : _b.patternId);
+    if (event.source === window && ((_a = event.data) == null ? void 0 : _a[TO_PAGE]) === true) {
+      console.log("[Sentinel] toast trigger received for:", (_b = event.data.finding) == null ? void 0 : _b.patternId);
       handleFinding(event.data.finding);
     }
   });
   console.log("[Sentinel] init complete");
 }
+function requestSettings() {
+  return new Promise((resolve) => {
+    const fallback = { enabled: true, disabledDomains: [] };
+    const timeout = setTimeout(() => resolve(fallback), 1e3);
+    window.addEventListener("message", function handler(event) {
+      var _a;
+      if (event.source === window && ((_a = event.data) == null ? void 0 : _a.__sentinel_settings__) === true) {
+        clearTimeout(timeout);
+        window.removeEventListener("message", handler);
+        resolve(event.data.settings ?? fallback);
+      }
+    });
+    window.postMessage({ __sentinel_get_settings__: true }, "*");
+  });
+}
 let domScanner = null;
-function startDomScanner(tabId) {
-  console.log("[Sentinel] starting DOM scanner with tabId:", tabId);
-  domScanner = new DomScanner(tabId);
+function startDomScanner() {
+  console.log("[Sentinel] starting DOM scanner");
+  domScanner = new DomScanner();
   domScanner.start();
   window.addEventListener("beforeunload", () => {
     domScanner == null ? void 0 : domScanner.stop();
@@ -652,39 +647,6 @@ function handleFinding(finding) {
     shownPatterns.add(finding.patternId);
     showFindingToast(finding);
   }
-}
-async function getTabId() {
-  return new Promise((resolve) => {
-    try {
-      chrome.runtime.sendMessage(chrome.runtime.id, { type: "GET_TAB_ID" }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.warn("[Sentinel] GET_TAB_ID error:", chrome.runtime.lastError.message);
-          resolve(null);
-          return;
-        }
-        resolve((response == null ? void 0 : response.tabId) ?? null);
-      });
-    } catch (e) {
-      console.warn("[Sentinel] GET_TAB_ID threw:", e);
-      resolve(null);
-    }
-  });
-}
-async function getSettings() {
-  return new Promise((resolve) => {
-    const fallback = { enabled: true, disabledDomains: [] };
-    try {
-      chrome.runtime.sendMessage(chrome.runtime.id, { type: "GET_SETTINGS" }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(fallback);
-          return;
-        }
-        resolve((response == null ? void 0 : response.settings) ?? fallback);
-      });
-    } catch {
-      resolve(fallback);
-    }
-  });
 }
 init().catch((err) => console.warn("[Sentinel] init error:", err));
 //# sourceMappingURL=content.js.map

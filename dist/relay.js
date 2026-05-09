@@ -1,11 +1,28 @@
-const SENTINEL_MSG_KEY = "__sentinel_finding__";
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const TO_BG = "__sentinel_to_bg__";
+const TO_PAGE = "__sentinel_to_page__";
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data[TO_BG] !== true) return;
+  chrome.runtime.sendMessage(data.message).catch(() => {
+  });
+});
+chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "FINDING_DETECTED") {
-    window.postMessage(
-      { [SENTINEL_MSG_KEY]: true, finding: message.finding },
-      window.location.origin || "*"
-    );
+    window.postMessage({ [TO_PAGE]: true, finding: message.finding }, "*");
   }
-  sendResponse(null);
+});
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data) return;
+  if (data.__sentinel_get_settings__) {
+    chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (response) => {
+      window.postMessage({
+        __sentinel_settings__: true,
+        settings: (response == null ? void 0 : response.settings) ?? { enabled: true, disabledDomains: [] }
+      }, "*");
+    });
+  }
 });
 //# sourceMappingURL=relay.js.map

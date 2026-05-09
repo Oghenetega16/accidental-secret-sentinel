@@ -19,11 +19,9 @@ import type { Finding } from '../shared/types';
 const TO_PAGE = '__sentinel_to_page__';
 
 async function init(): Promise<void> {
-  console.log('[Sentinel] MAIN world init, readyState:', document.readyState);
 
   // Ask coordinator (ISOLATED world) for settings
   const settings = await requestSettings();
-  console.log('[Sentinel] settings received — enabled:', settings.enabled);
 
   if (!settings.enabled) return;
 
@@ -36,7 +34,6 @@ async function init(): Promise<void> {
   // Patch fetch + XHR (must happen before page JS runs — document_start)
   interceptFetch();
   interceptXHR();
-  console.log('[Sentinel] fetch/XHR patched');
 
   // DOM scanner after DOM is ready
   if (document.readyState === 'loading') {
@@ -48,12 +45,9 @@ async function init(): Promise<void> {
   // Toast trigger — coordinator posts findings back here after service worker confirms
   window.addEventListener('message', (event) => {
     if (event.source === window && event.data?.[TO_PAGE] === true) {
-      console.log('[Sentinel] toast trigger received for:', event.data.finding?.patternId);
       handleFinding(event.data.finding as Finding);
     }
   });
-
-  console.log('[Sentinel] init complete');
 }
 
 // ─── Settings request ─────────────────────────────────────────────────────────
@@ -80,7 +74,6 @@ function requestSettings(): Promise<{ enabled: boolean; disabledDomains: string[
 let domScanner: InstanceType<typeof DomScanner> | null = null;
 
 function startDomScanner(): void {
-  console.log('[Sentinel] starting DOM scanner');
   domScanner = new DomScanner();
   domScanner.start();
   window.addEventListener('beforeunload', () => {

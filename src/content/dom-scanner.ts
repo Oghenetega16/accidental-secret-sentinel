@@ -74,8 +74,6 @@ export class DomScanner {
     const rawFindings = scan(input, { url, tabId: UNKNOWN_TAB, sourceType });
     if (!rawFindings.length) return;
 
-    console.log(`[Sentinel] found ${rawFindings.length} finding(s) in ${sourceType}`);
-
     Promise.all(rawFindings.map(r => r.toFinding())).then(findings => {
       for (const finding of findings) {
         window.postMessage({

@@ -22,7 +22,11 @@ window.addEventListener('message', (event) => {
 
   // Forward FINDING_DETECTED to service worker.
   // The service worker will override tabId from sender.tab.id.
-  chrome.runtime.sendMessage(data.message).catch(() => {});
+  // Callback form prevents Chrome logging 'Unchecked runtime.lastError'
+  // when the service worker is briefly asleep (normal MV3 behaviour).
+  chrome.runtime.sendMessage(data.message, () => {
+    void chrome.runtime.lastError;
+  });
 });
 
 // ── service worker → MAIN world ───────────────────────────────────────────────
