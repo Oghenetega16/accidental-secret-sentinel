@@ -482,7 +482,6 @@ class DomScanner {
   scanText(input, sourceType, url) {
     const rawFindings = scan(input, { url, tabId: UNKNOWN_TAB, sourceType });
     if (!rawFindings.length) return;
-    console.log(`[Sentinel] found ${rawFindings.length} finding(s) in ${sourceType}`);
     Promise.all(rawFindings.map((r) => r.toFinding())).then((findings) => {
       for (const finding of findings) {
         window.postMessage({
@@ -587,9 +586,7 @@ function escHtml(s) {
 }
 const TO_PAGE = "__sentinel_to_page__";
 async function init() {
-  console.log("[Sentinel] MAIN world init, readyState:", document.readyState);
   const settings = await requestSettings();
-  console.log("[Sentinel] settings received — enabled:", settings.enabled);
   if (!settings.enabled) return;
   const hostname = window.location.hostname;
   const blocked = settings.disabledDomains.some(
@@ -601,20 +598,17 @@ async function init() {
   }
   interceptFetch();
   interceptXHR();
-  console.log("[Sentinel] fetch/XHR patched");
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", startDomScanner, { once: true });
   } else {
     startDomScanner();
   }
   window.addEventListener("message", (event) => {
-    var _a, _b;
+    var _a;
     if (event.source === window && ((_a = event.data) == null ? void 0 : _a[TO_PAGE]) === true) {
-      console.log("[Sentinel] toast trigger received for:", (_b = event.data.finding) == null ? void 0 : _b.patternId);
       handleFinding(event.data.finding);
     }
   });
-  console.log("[Sentinel] init complete");
 }
 function requestSettings() {
   return new Promise((resolve) => {
@@ -633,7 +627,6 @@ function requestSettings() {
 }
 let domScanner = null;
 function startDomScanner() {
-  console.log("[Sentinel] starting DOM scanner");
   domScanner = new DomScanner();
   domScanner.start();
   window.addEventListener("beforeunload", () => {

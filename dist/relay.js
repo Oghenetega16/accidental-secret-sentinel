@@ -4,7 +4,8 @@ window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data[TO_BG] !== true) return;
-  chrome.runtime.sendMessage(data.message).catch(() => {
+  chrome.runtime.sendMessage(data.message, () => {
+    void chrome.runtime.lastError;
   });
 });
 chrome.runtime.onMessage.addListener((message) => {
