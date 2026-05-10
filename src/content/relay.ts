@@ -22,11 +22,9 @@ window.addEventListener('message', (event) => {
 
   // Forward FINDING_DETECTED to service worker.
   // The service worker will override tabId from sender.tab.id.
-  // Callback form prevents Chrome logging 'Unchecked runtime.lastError'
-  // when the service worker is briefly asleep (normal MV3 behaviour).
-  chrome.runtime.sendMessage(data.message, () => {
-    void chrome.runtime.lastError;
-  });
+  try {
+    chrome.runtime.sendMessage(data.message, () => { void chrome.runtime.lastError; });
+  } catch { /* extension context invalidated — resolves on next page load */ }
 });
 
 // ── service worker → MAIN world ───────────────────────────────────────────────
@@ -46,11 +44,13 @@ window.addEventListener('message', (event) => {
   if (!data) return;
 
   if (data.__sentinel_get_settings__) {
-    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response) => {
-      window.postMessage({
-        __sentinel_settings__: true,
-        settings: response?.settings ?? { enabled: true, disabledDomains: [] },
-      }, '*');
-    });
+    try {
+      chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response) => {
+        window.postMessage({
+          __sentinel_settings__: true,
+          settings: response?.settings ?? { enabled: true, disabledDomains: [] },
+        }, '*');
+      });
+    } catch { /* extension context invalidated */ }
   }
 });

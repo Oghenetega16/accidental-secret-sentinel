@@ -50,7 +50,12 @@ export function interceptXHR(): void {
     override send(body?: Document | XMLHttpRequestBodyInit | null): void {
       if (body && typeof body === 'string') emitFindings(body, this._url, 'request-body');
       this.addEventListener('load', () => {
-        if (typeof this.responseText === 'string') emitFindings(this.responseText, this._url, 'response-body');
+        try {
+          const body = (!this.responseType || this.responseType === 'text')
+            ? this.responseText
+            : this.responseType === 'json' && this.response ? JSON.stringify(this.response) : null;
+          if (body) emitFindings(body, this._url, 'response-body');
+        } catch { /* unsupported responseType — skip */ }
         const h = this.getAllResponseHeaders();
         if (h) emitFindings(h, this._url, 'response-header');
       });

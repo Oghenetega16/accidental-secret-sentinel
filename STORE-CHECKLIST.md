@@ -83,6 +83,8 @@ All scanning happens locally in your browser — nothing leaves your machine. No
 • Export findings as JSON for incident reports
 • Domain allowlist to skip trusted internal tools
 
+**Note on toast notifications:** On sites with a strict Content Security Policy (such as YouTube, Stripe, or GitHub), the in-page toast notification may be blocked by the site's CSP. This does not affect detection — all findings are still captured, the badge still updates, and the full list is always available in the extension popup and DevTools panel.
+
 **Privacy:** 100% local. See the full privacy policy at [your GitHub Pages URL].
 
 ### Pre-submission
